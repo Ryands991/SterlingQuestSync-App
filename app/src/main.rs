@@ -17,6 +17,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_updater::UpdaterExt;
 
 use sqs_core::api::{self, Api, Client};
 use sqs_core::engine::{self, Report};
@@ -56,6 +57,8 @@ struct Settings {
     joined: bool,
     auto_sync: bool,
     auto_update_sterling: bool,
+    /// Off by default: the app asks before updating itself.
+    auto_update_app: bool,
     character: Option<String>,
 }
 
@@ -68,6 +71,7 @@ impl Default for Settings {
             joined: false,
             auto_sync: true,
             auto_update_sterling: true,
+            auto_update_app: false,
             character: None,
         }
     }
@@ -119,6 +123,8 @@ struct Inner {
     activity: Vec<Activity>,
     sterling_latest: Option<String>,
     app_latest: Option<String>,
+    /// A signed app update the updater found, ready to install.
+    app_update: Option<String>,
     sterling_checked: Option<Instant>,
     busy: bool,
 }
@@ -231,6 +237,8 @@ struct Status {
     sterling_version: Option<String>,
     sterling_latest: Option<String>,
     app_latest: Option<String>,
+    app_update: Option<String>,
+    auto_update_app: bool,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -316,6 +324,8 @@ fn build_status(st: &AppState) -> Status {
         sterling_version,
         sterling_latest: inner.sterling_latest.clone(),
         app_latest: inner.app_latest.clone(),
+        app_update: inner.app_update.clone(),
+        auto_update_app: s.auto_update_app,
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -561,7 +571,14 @@ fn sync_now(app: AppHandle) -> Result<Report, String> {
 }
 
 #[tauri::command]
-fn set_options(app: AppHandle, st: State<'_, AppState>, auto_sync: Option<bool>, auto_update_sterling: Option<bool>, character: Option<String>) -> Result<(), String> {
+fn set_options(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    auto_sync: Option<bool>,
+    auto_update_sterling: Option<bool>,
+    auto_update_app: Option<bool>,
+    character: Option<String>,
+) -> Result<(), String> {
     {
         let mut inner = st.inner.lock().unwrap();
         if let Some(v) = auto_sync {
@@ -569,6 +586,9 @@ fn set_options(app: AppHandle, st: State<'_, AppState>, auto_sync: Option<bool>,
         }
         if let Some(v) = auto_update_sterling {
             inner.settings.auto_update_sterling = v;
+        }
+        if let Some(v) = auto_update_app {
+            inner.settings.auto_update_app = v;
         }
         if let Some(c) = character.filter(|c| sqs_core::formats::valid_guid(c)) {
             inner.settings.character = Some(c);
@@ -725,6 +745,43 @@ fn update_sterling(app: AppHandle) -> Result<String, String> {
     install_sterling(&app)
 }
 
+// ------------------------------------------------------------------ app updates
+
+/// Asks the update feed whether a newer, signed app is out. Signature checks happen on install.
+fn check_app_update(app: &AppHandle) -> Option<String> {
+    let found = tauri::async_runtime::block_on(async {
+        let u = app.updater().ok()?;
+        u.check().await.ok().flatten().map(|x| x.version)
+    });
+    let st = app.state::<AppState>();
+    st.inner.lock().unwrap().app_update = found.clone();
+    found
+}
+
+/// Downloads the update, checks its signature against the key built into this app, and runs it.
+/// The installer closes the app and starts the new version.
+fn install_app_update(app: &AppHandle) -> Result<(), String> {
+    let st = app.state::<AppState>();
+    st.inner.lock().unwrap().log("Updating Sterling Quest Sync...", "");
+    emit_status(app);
+    tauri::async_runtime::block_on(async {
+        let u = app.updater().map_err(|e| e.to_string())?;
+        let up = u.check().await.map_err(|e| e.to_string())?.ok_or("Already up to date.")?;
+        up.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+        Ok::<(), String>(())
+    })?;
+    app.restart();
+}
+
+#[tauri::command(async)]
+fn update_app(app: AppHandle) -> Result<(), String> {
+    install_app_update(&app).map_err(|e| {
+        app.state::<AppState>().inner.lock().unwrap().log(format!("App update failed: {e}"), "bad");
+        emit_status(&app);
+        e
+    })
+}
+
 /// Opens the backups folder in the file manager (the page never sees the path).
 #[tauri::command]
 fn open_backups() -> Result<(), String> {
@@ -777,6 +834,7 @@ fn background(app: AppHandle) {
     *app.state::<AppState>().rewatch.lock().unwrap() = Some(rewatch_tx);
     let mut game = GameCheck::default();
     let _ = check_sterling_quiet(&app);
+    let _ = check_app_update(&app);
     emit_status(&app);
     loop {
         let dirs: Vec<(String, PathBuf)> = {
@@ -825,6 +883,10 @@ fn background(app: AppHandle) {
                         emit_status(&app);
                     }
                     if checked.is_none_or(|c| c.elapsed() >= STERLING_CHECK_EVERY) {
+                        let auto_app = app.state::<AppState>().inner.lock().unwrap().settings.auto_update_app;
+                        if check_app_update(&app).is_some() && auto_app && !running {
+                            let _ = install_app_update(&app);
+                        }
                         if let Some(latest) = check_sterling_quiet(&app) {
                             let installed = updater::installed_version(&f);
                             if auto_sterling && installed.as_deref().is_some_and(|i| updater::newer(&latest, i)) {
@@ -884,6 +946,7 @@ fn main() {
             activity: load_json("activity.json"),
             sterling_latest: None,
             app_latest: None,
+            app_update: None,
             sterling_checked: None,
             busy: false,
         }),
@@ -894,6 +957,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Sterling Quest Sync", true, None::<&str>)?;
@@ -948,6 +1012,7 @@ fn main() {
             remove_pc,
             delete_my_data,
             update_sterling,
+            update_app,
             open_backups,
             open_page,
             hide_to_tray,

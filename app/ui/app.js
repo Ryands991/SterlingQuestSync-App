@@ -202,6 +202,14 @@ function renderHome(c) {
   }
   $("h-last").textContent = S.last_sync ? "Last synced " + ago(S.last_sync) : "Not synced yet";
 
+  const ac = $("app-card");
+  const av = S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
+  if (av) {
+    ac.hidden = false;
+    $("app-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
+    $("app-update").hidden = !S.app_update; // only offer the button once a signed update is ready
+  } else ac.hidden = true;
+
   const card = $("sterling-card");
   const v = S.sterling_version, l = S.sterling_latest;
   if (v && l && newer(l, v)) {
@@ -357,6 +365,7 @@ async function loadPcs() {
 function renderSettings() {
   $("s-auto").checked = S.auto_sync;
   $("s-sterling-auto").checked = S.auto_update_sterling;
+  $("s-app-auto").checked = S.auto_update_app;
   $("s-sterling").textContent = S.sterling_version ? "Installed " + S.sterling_version + ". Your old copy is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
   if (!pcsLoaded) loadPcs();
@@ -410,6 +419,11 @@ $("rj-recover").onclick = () => { setupStep = "recover"; render(S); };
 $("sync").onclick = () => call("sync_now").catch(fail);
 $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
+$("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
+$("app-update").onclick = async () => {
+  const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + S.app_update + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
+  if (ok) busy($("app-update"), () => call("update_app"));
+};
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);
 $("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? ". /reload in game." : "")); });
