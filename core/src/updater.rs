@@ -18,6 +18,7 @@ use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
 pub const REPO: &str = "SterlingAddons/SterlingQuest";
+pub const APP_REPO: &str = "SterlingAddons/SterlingQuestSync-App";
 const MAX_ZIP: u64 = 20 * 1024 * 1024;
 const MAX_UNPACKED: u64 = 60 * 1024 * 1024;
 const MAX_ENTRIES: usize = 3000;
@@ -106,6 +107,20 @@ pub fn latest_release() -> Result<Release> {
         return Err(Error::Refused("release file isn't from the Sterling repo".into()));
     }
     Ok(Release { version, url: a.browser_download_url, size: a.size })
+}
+
+/// Newest published version of a repo's releases (tag like v0.1.3), or None if there isn't one.
+pub fn latest_tag(repo: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Rel {
+        tag_name: String,
+    }
+    let r = github().ok()?.get(format!("https://api.github.com/repos/{repo}/releases/latest")).header("Accept", "application/vnd.github+json").send().ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let v = r.json::<Rel>().ok()?.tag_name.trim_start_matches('v').to_string();
+    valid_version(&v).then_some(v)
 }
 
 pub fn download(rel: &Release) -> Result<Vec<u8>> {

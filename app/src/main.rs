@@ -20,7 +20,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use sqs_core::api::{self, Api, Client};
 use sqs_core::engine::{self, Report};
-use sqs_core::formats::{parse_outbox, Kind, Outbox};
+use sqs_core::formats::{parse_outbox, AppInfo, Kind, Outbox};
 use sqs_core::game::{GameCheck, SaveWatcher};
 use sqs_core::keystore::{KeyStore, SystemStore};
 use sqs_core::paths::{self, GameFolder};
@@ -118,6 +118,7 @@ struct Inner {
     rejoin: bool,
     activity: Vec<Activity>,
     sterling_latest: Option<String>,
+    app_latest: Option<String>,
     sterling_checked: Option<Instant>,
     busy: bool,
 }
@@ -229,6 +230,7 @@ struct Status {
     companion_installed: bool,
     sterling_version: Option<String>,
     sterling_latest: Option<String>,
+    app_latest: Option<String>,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -313,6 +315,7 @@ fn build_status(st: &AppState) -> Status {
         companion_installed,
         sterling_version,
         sterling_latest: inner.sterling_latest.clone(),
+        app_latest: inner.app_latest.clone(),
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -509,9 +512,11 @@ fn run_sync(app: &AppHandle) -> Result<Report, String> {
     let res = (|| {
         let client = st.client(&settings).map_err(Error::Other)?;
         let mut inner = st.inner.lock().unwrap();
+        // Versions the add-on shows after a /reload.
+        let app_info = AppInfo { version: VERSION.into(), latest: inner.app_latest.clone(), sterling_latest: inner.sterling_latest.clone() };
         let sess = inner.session.as_mut().ok_or_else(|| Error::Other("Pick your game folder first.".into()))?;
         let (outboxes, problems) = read_outboxes(&sess.fs);
-        let mut r = engine::sync(&client, &sess.fs, &mut sess.state, &outboxes, now());
+        let mut r = engine::sync(&client, &sess.fs, &mut sess.state, &outboxes, Some(app_info), now());
         if let Ok(rep) = r.as_mut() {
             rep.skipped.extend(problems);
         }
@@ -684,8 +689,12 @@ fn delete_my_data(app: AppHandle, st: State<'_, AppState>) -> Result<(), String>
 // ------------------------------------------------------------------ Sterling updates
 
 fn check_sterling_quiet(app: &AppHandle) -> Option<String> {
-    let rel = updater::latest_release().ok()?;
+    let app_latest = updater::latest_tag(updater::APP_REPO);
     let st = app.state::<AppState>();
+    if app_latest.is_some() {
+        st.inner.lock().unwrap().app_latest = app_latest;
+    }
+    let rel = updater::latest_release().ok()?;
     let mut inner = st.inner.lock().unwrap();
     inner.sterling_latest = Some(rel.version.clone());
     inner.sterling_checked = Some(Instant::now());
@@ -874,6 +883,7 @@ fn main() {
             rejoin: false,
             activity: load_json("activity.json"),
             sterling_latest: None,
+            app_latest: None,
             sterling_checked: None,
             busy: false,
         }),

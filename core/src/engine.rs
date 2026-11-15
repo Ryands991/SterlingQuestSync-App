@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{Api, Character, Pairing, Upload};
 use crate::companion;
-use crate::formats::{valid_guid, valid_packet, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_KEY};
+use crate::formats::{valid_guid, AppInfo, valid_packet, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_KEY};
 use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
@@ -184,7 +184,8 @@ fn pairs_for(pairings: &[Pairing], me: &str) -> Vec<InPair> {
 }
 
 /// One full pass. `now` is the wall clock, used only for `written` and `last_sync`.
-pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox], now: i64) -> Result<Report> {
+/// `app` carries the versions the add-on shows; None leaves what the inbox has.
+pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox], app: Option<AppInfo>, now: i64) -> Result<Report> {
     let mut st = state.clone();
     st.format = STATE_FORMAT;
     let mut rep = Report::default();
@@ -267,6 +268,9 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
 
     // 4. Downloads, page by page.
     let before = st.inbox.clone();
+    if let Some(a) = app {
+        st.inbox.app = Some(a);
+    }
     let mine: BTreeSet<String> = st.listed.keys().cloned().collect();
     for _ in 0..MAX_INBOX_PAGES {
         let page = api.inbox(st.since)?;
@@ -454,16 +458,16 @@ mod tests {
         let api = Fake::default();
         api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
         let mut st = load_state(&fs_);
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "COPY1", None)], 1_794_770_100).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "COPY1", None)], None, 1_794_770_100).unwrap();
         assert_eq!(r.uploaded, 2, "self and Bran");
         assert_eq!(r.not_paired, vec![(ME.to_string(), ALT.to_string())]);
         assert_eq!(*api.chars.borrow(), 1);
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "COPY1", None)], 1_794_770_200).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "COPY1", None)], None, 1_794_770_200).unwrap();
         assert_eq!(r.uploaded, 0);
         assert_eq!(*api.chars.borrow(), 1, "already listed");
         assert!(pending(&st, &[outbox(1_794_770_000, "COPY1", None)]).is_empty());
         assert_eq!(pending(&st, &[outbox(1_794_770_500, "COPY2", None)]).len(), 1);
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_500, "COPY2", None)], 1_794_770_600).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_500, "COPY2", None)], None, 1_794_770_600).unwrap();
         assert_eq!(r.uploaded, 2);
     }
 
@@ -474,11 +478,11 @@ mod tests {
         api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
         api.slots.borrow_mut().insert(slot_key(ME, BRAN), (1_794_779_999, "NEWER".into(), 99));
         let mut st = load_state(&fs_);
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "OLDER", None)], 1).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "OLDER", None)], None, 1).unwrap();
         assert_eq!(r.stale, vec![(ME.to_string(), BRAN.to_string())]);
         assert_eq!(api.slots.borrow()[&slot_key(ME, BRAN)].1, "NEWER");
         let puts = *api.puts.borrow();
-        sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "OLDER", None)], 2).unwrap();
+        sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "OLDER", None)], None, 2).unwrap();
         assert_eq!(*api.puts.borrow(), puts, "not retried");
     }
 
@@ -495,7 +499,7 @@ mod tests {
             incoming(5, "Player-6800-DEADBEEF", ME, "partner", "STRANGER"),
         ]);
         let mut st = load_state(&fs_);
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], 1_794_770_100).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_100).unwrap();
         assert!(r.inbox_written);
         assert_eq!(st.since, 5);
         let me = &st.inbox.chars[ME];
@@ -519,9 +523,9 @@ mod tests {
         api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
         let mut st = load_state(&fs_);
         // Removal from before this pairing was made: ignored (they paired again since).
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", Some(1_793_000_000))], 1).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", Some(1_793_000_000))], None, 1).unwrap();
         assert!(r.ended.is_empty());
-        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", Some(1_794_500_000))], 2).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", Some(1_794_500_000))], None, 2).unwrap();
         assert_eq!(r.ended, vec!["p1".to_string()]);
         let pr = &st.inbox.chars[ME].pairs[0];
         assert_eq!(pr.status, PairStatus::Ended);
@@ -538,7 +542,7 @@ mod tests {
         let api = Fake::default();
         api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
         let mut st = load_state(&fs_);
-        let r = sync(&api, &fs_, &mut st, &[o], 1).unwrap();
+        let r = sync(&api, &fs_, &mut st, &[o], None, 1).unwrap();
         assert_eq!(r.uploaded, 1);
         assert_eq!(api.slots.borrow()[&slot_key(ME, BRAN)].1, "ABC");
     }

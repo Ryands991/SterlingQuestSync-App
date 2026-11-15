@@ -210,6 +210,26 @@ pub struct InChar {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Inbox {
     pub chars: BTreeMap<String, InChar>,
+    /// Versions for the add-on to show ("app update available" after a /reload).
+    #[serde(default)]
+    pub app: Option<AppInfo>,
+}
+
+/// Version numbers only: digits and dots.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AppInfo {
+    /// This app's version.
+    pub version: String,
+    /// Newest app release, if known.
+    pub latest: Option<String>,
+    /// Newest Sterling release, if known.
+    pub sterling_latest: Option<String>,
+}
+
+static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4})?$").unwrap());
+
+pub fn valid_version(v: &str) -> bool {
+    RE_VERSION.is_match(v)
 }
 
 impl Inbox {
@@ -240,6 +260,12 @@ impl Inbox {
 
 fn check_inbox(inbox: &Inbox) -> Result<()> {
     let bad = |m: &str| Err(Error::Refused(format!("inbox value failed the allowlist: {m}")));
+    if let Some(a) = &inbox.app {
+        let ok = valid_version(&a.version) && [&a.latest, &a.sterling_latest].into_iter().flatten().all(|v| valid_version(v));
+        if !ok {
+            return bad("version");
+        }
+    }
     for (to, c) in &inbox.chars {
         if !valid_guid(to) {
             return bad("target GUID");
@@ -270,7 +296,17 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String> {
     let mut s = String::new();
     s.push_str("-- Written by the Sterling Quest Sync app. Do not edit; it is replaced on every sync.\n");
     s.push_str("SterlingQuestSync_Inbox = {\n");
-    s.push_str(&format!("  format = {},\n  written = {},\n  chars = {{\n", FORMAT, written));
+    s.push_str(&format!("  format = {},\n  written = {},\n", FORMAT, written));
+    if let Some(a) = &inbox.app {
+        let v = |x: &Option<String>| x.as_ref().map(|s| format!("\"{s}\"")).unwrap_or_else(|| "nil".into());
+        s.push_str(&format!(
+            "  app = {{ version = \"{}\", latest = {}, sterling_latest = {} }},\n",
+            a.version,
+            v(&a.latest),
+            v(&a.sterling_latest)
+        ));
+    }
+    s.push_str("  chars = {\n");
     for (to, c) in &inbox.chars {
         s.push_str(&format!("    [\"{to}\"] = {{\n      packets = {{\n"));
         for p in &c.packets {
@@ -432,6 +468,21 @@ mod tests {
         assert!(ib.put_packet(ME, newer));
         assert_eq!(ib.chars[ME].packets.len(), 1);
         assert_eq!(ib.chars[ME].packets[0].data, "NEW");
+    }
+
+    #[test]
+    fn app_versions_go_in_and_bad_ones_are_refused() {
+        let mut ib = sample_inbox();
+        ib.app = Some(AppInfo { version: "0.1.2".into(), latest: Some("0.1.3".into()), sterling_latest: None });
+        let lua = render_inbox(&ib, 1794770123).unwrap();
+        let v = parse_saved_variables(&lua).unwrap();
+        let app = v["SterlingQuestSync_Inbox"].as_table().unwrap().get("app").unwrap().as_table().unwrap();
+        assert_eq!(app.get("version").unwrap().as_str(), Some("0.1.2"));
+        assert_eq!(app.get("latest").unwrap().as_str(), Some("0.1.3"));
+        for bad in ["0.1.3\" os.exit() --", "v0.1", "", "1.2.3.4"] {
+            ib.app = Some(AppInfo { version: "0.1.2".into(), latest: Some(bad.into()), sterling_latest: None });
+            assert!(render_inbox(&ib, 1794770123).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

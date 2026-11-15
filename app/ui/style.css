@@ -145,3 +145,5 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .facts span:first-child { color: var(--muted); }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); max-width: 80%; padding: 10px 16px; background: var(--raised); border: 1px solid var(--brass); border-radius: 4px; z-index: 20; }
 .toast.bad { border-color: var(--bad-line); background: var(--bad-bg); color: #f2b1a2; }
+.small-warn { padding: 10px 14px; gap: 10px; }
+.small-warn .dot { margin-top: 7px; width: 8px; height: 8px; }

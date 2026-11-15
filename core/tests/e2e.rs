@@ -65,7 +65,7 @@ impl Pc {
             Ok(t) => vec![parse_outbox(&t).unwrap()],
             Err(_) => vec![],
         };
-        sync(&self.api, &self.fs, &mut self.state, &o, now()).unwrap()
+        sync(&self.api, &self.fs, &mut self.state, &o, None, now()).unwrap()
     }
 
     fn inbox_lua(&self) -> String {

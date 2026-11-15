@@ -135,7 +135,11 @@ async function loadGames() {
   games.forEach((g, i) => {
     const l = el("label", "choice game" + (i === 0 ? " framed" : ""));
     const r = el("input"); r.type = "radio"; r.name = "game"; r.value = String(i); r.checked = i === 0;
-    r.onchange = () => { for (const x of box.querySelectorAll(".choice")) x.classList.toggle("framed", x.querySelector("input").checked); };
+    r.onchange = () => {
+      for (const x of box.querySelectorAll(".choice")) x.classList.toggle("framed", x.querySelector("input").checked);
+      $("game-warn").hidden = g.flavour === "_forever_";
+      if (!$("game-warn").hidden) $("game-warn").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
     const t = el("span");
     const label = g.flavour === "_forever_" ? "WoW Forever (_forever_)" : g.flavour;
     t.append(el("span", "ct", label), el("span", "cd", g.has_sterling ? "Sterling found here" : "No Sterling here"));
@@ -149,6 +153,7 @@ async function loadGames() {
     box.append(more);
   }
   $("folder-go").disabled = !games.length;
+  $("game-warn").hidden = !games.length || games[0].flavour === "_forever_";
 }
 
 function renderApp() {
@@ -374,7 +379,13 @@ for (const r of document.querySelectorAll("input[name=first]")) r.addEventListen
   for (const l of document.querySelectorAll("#step-first .choice")) l.classList.toggle("framed", l.querySelector("input").checked);
 });
 
-$("pick").onclick = (e) => { e.preventDefault(); busy(null, async () => { await call("pick_game_folder"); setupStep = "first"; }); };
+const OTHER_WOW = ["_classic_era_", "_classic_", "_anniversary_", "_retail_", "_ptr_", "_beta_", "_classic_ptr_", "_xptr_"];
+async function warnIfNotForever(g) {
+  if (g && OTHER_WOW.includes(g.flavour)) {
+    await dialog("Made for WoW Forever", [para("You picked " + g.flavour + ". Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
+  }
+}
+$("pick").onclick = (e) => { e.preventDefault(); busy(null, async () => { const g = await call("pick_game_folder"); setupStep = "first"; await warnIfNotForever(g); }); };
 $("folder-go").onclick = () => {
   const r = document.querySelector("input[name=game]:checked");
   if (!r) return fail("Pick a game folder first.");
@@ -437,7 +448,7 @@ $("new-rec").onclick = async () => {
     await dialog("Your new recovery code", [para("Keep it somewhere safe, like a password manager. Shown once.", "muted"), codeBox(code), dl], [["I saved it", true, "primary"]]);
   });
 };
-$("s-change").onclick = () => busy($("s-change"), () => call("pick_game_folder"));
+$("s-change").onclick = () => busy($("s-change"), async () => warnIfNotForever(await call("pick_game_folder")));
 $("s-backups").onclick = () => call("open_backups").catch(fail);
 $("s-delete").onclick = async () => {
   const ok = await dialog("Delete your data?", [para("This removes your account, every PC, your pairings and your copies from the server, right away. Copies already on friends' PCs stay there. Your quests in game are not touched.", "muted"), warnBox("This can't be undone", "To sync again you'd start a new account and pair with friends again.")], [["Cancel", false, "ghost"], ["Delete everything", true, "bad"]]);
