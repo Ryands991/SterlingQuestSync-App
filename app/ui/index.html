@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sterling Quest Sync</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>Sterling Quest Sync <span id="ver"></span></h1>
+  <p class="note">Early test build. The full window comes next.</p>
+  <section id="setup" hidden>
+    <h2>Set up</h2>
+    <div id="games"></div>
+    <button id="pick">Pick folder...</button>
+    <div id="join" hidden>
+      <label>PC name <input id="label" maxlength="40"></label>
+      <button id="create">Yes, this is my first PC</button>
+      <label>Link code <input id="link" maxlength="20"></label>
+      <button id="dolink">Link this PC</button>
+      <p id="rec" hidden>Recovery code: <code id="reccode"></code> <button id="savetxt">Download .txt</button></p>
+    </div>
+  </section>
+  <section id="home" hidden>
+    <p id="line"></p>
+    <label><input type="checkbox" id="auto"> Sync automatically</label>
+    <button id="sync">Sync now</button>
+    <ul id="chars"></ul>
+  </section>
+  <p id="err" class="err"></p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+:root { --bg: #1d140e; --panel: #2b1e15; --brass: #c9a25a; --text: #e8dcc4; --muted: #a8977a; --bad: #c0574a; --good: #7fa65a; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+main { padding: 16px 20px; }
+h1 { color: var(--brass); font-size: 18px; margin: 0 0 4px; }
+h2 { color: var(--brass); font-size: 15px; }
+.note, #line { color: var(--muted); }
+button { background: var(--panel); color: var(--brass); border: 1px solid var(--brass); border-radius: 4px; padding: 5px 12px; margin: 4px 4px 4px 0; cursor: pointer; }
+input { background: var(--panel); color: var(--text); border: 1px solid #5a4630; border-radius: 3px; padding: 4px 6px; }
+label { display: block; margin: 6px 0; }
+.err { color: var(--bad); }
+li .ready { color: var(--good); }
+code { color: var(--brass); }
