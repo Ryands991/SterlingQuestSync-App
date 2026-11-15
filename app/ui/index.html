@@ -7,29 +7,214 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main>
-  <h1>Sterling Quest Sync <span id="ver"></span></h1>
-  <p class="note">Early test build. The full window comes next.</p>
-  <section id="setup" hidden>
-    <h2>Set up</h2>
-    <div id="games"></div>
-    <button id="pick">Pick folder...</button>
-    <div id="join" hidden>
-      <label>PC name <input id="label" maxlength="40"></label>
-      <button id="create">Yes, this is my first PC</button>
-      <label>Link code <input id="link" maxlength="20"></label>
-      <button id="dolink">Link this PC</button>
-      <p id="rec" hidden>Recovery code: <code id="reccode"></code> <button id="savetxt">Download .txt</button></p>
+<div class="frame">
+
+<header class="titlebar" data-tauri-drag-region>
+  <div class="brand" data-tauri-drag-region><span class="name" data-tauri-drag-region>Sterling Quest Sync</span><span class="ver" id="ver" data-tauri-drag-region></span></div>
+  <div class="winbtns">
+    <button type="button" id="win-min" aria-label="Minimize to tray" title="Minimize to tray"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5"/></svg></button>
+    <button type="button" id="win-close" class="close" aria-label="Close" title="Close"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5"/></svg></button>
+  </div>
+</header>
+
+<!-- Setup and rejoin: one centred column -->
+<div class="center" id="setup" hidden>
+  <div class="col">
+
+    <section class="step" id="step-folder">
+      <div class="eyebrow">STEP 1 OF 3</div>
+      <h1>Find your game</h1>
+      <p class="muted">Pick the WoW Forever folder, the one with Interface and WTF inside.</p>
+      <div class="choices" id="games"></div>
+      <p class="small muted">Not listed? <a href="#" id="pick">Pick a different folder</a>.</p>
+      <p class="small muted">The app only adds a small SterlingQuestSync add-on folder. It never writes to WTF or any other add-on.</p>
+      <div class="row end"><button type="button" class="btn primary" id="folder-go">Continue</button></div>
+    </section>
+
+    <section class="step" id="step-first" hidden>
+      <div class="eyebrow">STEP 2 OF 3</div>
+      <h1>Is this your first PC with Sterling Quest Sync?</h1>
+      <div class="choices">
+        <label class="choice framed"><input type="radio" name="first" value="yes" checked><span><span class="ct">Yes, this is my first PC</span><span class="cd">We'll make your account now. No email or password needed.</span></span></label>
+        <label class="choice"><input type="radio" name="first" value="no"><span><span class="ct">No, I already use it on another PC</span><span class="cd">You'll enter a code from your other PC so both share one account.</span></span></label>
+      </div>
+      <label class="field"><span>Name this PC (only you see it)</span><input id="pcname1" maxlength="40"></label>
+      <p class="small muted">Lost your other PC? <a href="#" id="to-recover">Use a recovery code</a> instead.</p>
+      <div class="row spread"><button type="button" class="btn ghost" data-back="folder">Back</button><button type="button" class="btn primary" id="first-go">Continue</button></div>
+    </section>
+
+    <section class="step" id="step-link" hidden>
+      <div class="eyebrow">STEP 2 OF 3</div>
+      <h1>Link to your other PC</h1>
+      <p class="muted">On your other PC, open <b>Settings &gt; Link another PC</b>. Type the code it shows. It lasts 10 minutes.</p>
+      <div class="card framed fields">
+        <label class="field big"><span>Link code</span><input id="linkcode" placeholder="XXXX-XXXX-XXXX" maxlength="20" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Name this PC (only you see it)</span><input id="pcname2" maxlength="40"></label>
+      </div>
+      <p class="small muted"><span class="dot good"></span>Your partners carry over. Nothing is removed from your other PC.</p>
+      <div class="row spread"><button type="button" class="btn ghost" data-back="first">Back</button><button type="button" class="btn primary" id="link-go">Link this PC</button></div>
+    </section>
+
+    <section class="step" id="step-recover" hidden>
+      <div class="eyebrow">STEP 2 OF 3</div>
+      <h1>Use your recovery code</h1>
+      <p class="muted">It starts with SQS-. Your account and partners come back on this PC.</p>
+      <div class="card framed fields">
+        <label class="field big"><span>Recovery code</span><input id="reccode-in" placeholder="SQS-XXXX-XXXX-XXXX-XXXX-XXXX" maxlength="40" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Name this PC (only you see it)</span><input id="pcname3" maxlength="40"></label>
+      </div>
+      <div class="row spread"><button type="button" class="btn ghost" data-back="first">Back</button><button type="button" class="btn primary" id="recover-go">Get my account back</button></div>
+    </section>
+
+    <section class="step" id="step-code" hidden>
+      <div class="eyebrow">STEP 3 OF 3, OPTIONAL</div>
+      <h1>Your recovery code</h1>
+      <p class="muted">If you ever lose every PC with this app, this code gets your account and partners back. Keep it somewhere safe, like a password manager. Shown once.</p>
+      <div class="card framed coderow">
+        <div class="bigcode" id="reccode"></div>
+        <div class="row"><button type="button" class="btn primary" data-copy="reccode">Copy</button><button type="button" class="btn" id="rec-txt">Download .txt</button></div>
+      </div>
+      <ul class="notes">
+        <li>Skipping is fine. Without it, a fresh install just starts a new account and you pair with friends again.</li>
+        <li>Download saves a small text file wherever you pick, named <b>sterling-quest-sync-recovery.txt</b>.</li>
+        <li>You can make a new code any time in Settings. The old one stops working.</li>
+      </ul>
+      <div class="row end"><button type="button" class="btn ghost" id="rec-skip">Skip</button><button type="button" class="btn primary" id="rec-done">I saved it</button></div>
+    </section>
+
+    <section class="step" id="step-rejoin" hidden>
+      <div class="warn">
+        <span class="dot bad"></span>
+        <div><h1>The server doesn't know this PC</h1>
+        <p>Your account may have expired after a long break, been deleted, or this PC was removed from it. Your quests in game are safe. Nothing on this PC was changed.</p></div>
+      </div>
+      <div class="choices">
+        <button type="button" class="choice framed" id="rj-fresh"><span><span class="ct">Start fresh</span><span class="cd">New account. You'll pair with friends again.</span><span class="cd good-note"><span class="dot good"></span>Not so bad: your quests live in the game, so nothing is lost. Once you pair again, friends get a full copy in one sync.</span></span></button>
+        <button type="button" class="choice" id="rj-link"><span><span class="ct">Link to my other PC</span><span class="cd">If another PC still syncs, use its link code.</span></span></button>
+        <button type="button" class="choice" id="rj-recover"><span><span class="ct">Use my recovery code</span><span class="cd">Keeps your partners if the account still exists.</span></span></button>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app: sidebar + page -->
+<div class="app" id="app" hidden>
+  <nav class="side" aria-label="Main">
+    <button type="button" data-page="home">Home</button>
+    <button type="button" data-page="partners">Partners</button>
+    <button type="button" data-page="pair">Pair a friend</button>
+    <button type="button" data-page="activity">Activity</button>
+    <button type="button" data-page="settings">Settings</button>
+    <div class="server" id="server"><span class="dot"></span><span id="server-text">Checking server</span></div>
+    <div class="charpick">
+      <label for="char">CHARACTER</label>
+      <select id="char"></select>
+      <span class="small muted" id="thispc"></span>
     </div>
-  </section>
-  <section id="home" hidden>
-    <p id="line"></p>
-    <label><input type="checkbox" id="auto"> Sync automatically</label>
-    <button id="sync">Sync now</button>
-    <ul id="chars"></ul>
-  </section>
-  <p id="err" class="err"></p>
-</main>
+  </nav>
+
+  <main class="page" id="page-home">
+    <div class="hero framed">
+      <div class="hero-text">
+        <span class="eyebrow" id="h-char"></span>
+        <h1 id="h-title"></h1>
+        <span class="hero-line"><span class="dot" id="h-dot"></span><span id="h-line"></span></span>
+        <span class="small muted" id="h-last"></span>
+      </div>
+      <div class="hero-act">
+        <button type="button" class="btn primary big" id="sync">Sync now</button>
+        <label class="check"><input type="checkbox" id="auto">Sync automatically</label>
+      </div>
+    </div>
+    <div class="microcard" id="sterling-card" hidden>
+      <span id="sterling-text"></span>
+      <button type="button" class="btn small" id="sterling-update">Update</button>
+    </div>
+    <div class="grid">
+      <section class="card"><h2>Partners</h2><div id="h-partners"></div></section>
+      <section class="card"><h2>Recent</h2><div id="h-recent"></div></section>
+    </div>
+  </main>
+
+  <main class="page" id="page-partners" hidden>
+    <div class="pagehead">
+      <div><h1>Partners</h1><p class="muted" id="p-sub"></p></div>
+      <button type="button" class="btn primary" data-page="pair">Pair a friend</button>
+    </div>
+    <section class="card tablecard"><table class="ptable"><thead><tr><th>NAME</th><th>LAST COPY</th><th>STATUS</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="p-rows"></tbody></table></section>
+    <p class="small muted">Changes here reach the game at your next login or /reload. Changes made in game show up here after the game saves. If both happen in one session, removing wins.</p>
+  </main>
+
+  <main class="page" id="page-pair" hidden>
+    <div><h1>Pair a friend</h1><p class="muted">One of you makes a code, the other types it in. That's the only way to sync with someone; nobody can find you or send you a request.</p></div>
+    <div class="grid">
+      <section class="card framed col-gap">
+        <h2>Give a code</h2>
+        <p class="small muted">For <b class="charname"></b>. Send it privately (Discord DM, text).</p>
+        <div id="give-empty" class="col-gap">
+          <div class="dashed">No code yet. Nothing is shared until you make one.</div>
+          <button type="button" class="btn primary" id="gen">Generate code</button>
+        </div>
+        <div id="give-made" class="col-gap" hidden>
+          <div class="bigcode" id="latest-code"></div>
+          <span class="small muted">Works once, for 24 hours. One code per friend.</span>
+          <div class="row"><button type="button" class="btn primary" data-copy="latest-code">Copy</button><button type="button" class="btn" id="gen2">New code</button><button type="button" class="btn ghost" id="cancel-latest">Cancel</button></div>
+          <div id="older" class="older" hidden><span class="eyebrow">OTHER OPEN CODES</span><div id="older-list"></div></div>
+        </div>
+      </section>
+      <section class="card col-gap">
+        <h2>Got a code?</h2>
+        <label class="field big plain"><span>Type the code your friend sent</span><input id="paircode" placeholder="XXXX-XXXX-XXXX" maxlength="20" autocomplete="off" spellcheck="false"></label>
+        <span class="small muted">Pairs it with <b class="charname"></b>. You'll see who it's from before anything is shared.</span>
+        <button type="button" class="btn" id="check-code">Check code</button>
+      </section>
+    </div>
+    <p class="small muted" id="pair-count"></p>
+  </main>
+
+  <main class="page" id="page-activity" hidden>
+    <h1>Activity</h1>
+    <section class="card"><div id="act-list"></div></section>
+  </main>
+
+  <main class="page" id="page-settings" hidden>
+    <h1>Settings</h1>
+    <section class="card">
+      <h2>Your PCs</h2>
+      <div id="pcs"><div class="small muted">Loading...</div></div>
+      <div class="row"><button type="button" class="btn" id="link-pc">Link another PC</button><button type="button" class="btn" id="new-rec">Make a new recovery code</button></div>
+    </section>
+    <section class="card">
+      <h2>Syncing and updates</h2>
+      <label class="toggle"><span>Sync automatically after each save</span><input type="checkbox" id="s-auto"></label>
+      <label class="toggle"><span>Keep Sterling up to date<span class="small muted block" id="s-sterling"></span></span><input type="checkbox" id="s-sterling-auto"></label>
+    </section>
+    <section class="card">
+      <h2>Game folder and safety</h2>
+      <div class="kv"><span id="s-path" class="path"></span><button type="button" class="btn small" id="s-change">Change</button></div>
+      <p class="small muted">This app only ever writes to the <b>SterlingQuestSync</b> and <b>Sterling</b> add-on folders and its own folder. It never writes to WTF or any other add-on.</p>
+      <div class="kv"><span>Backups of Sterling's saved data, made before each change</span><button type="button" class="btn small" id="s-backups">Open folder</button></div>
+    </section>
+    <section class="card danger">
+      <div><div class="dt">Delete my data</div><div class="small">Removes your account, PCs, pairings and copies from the server. Copies already on friends' PCs stay there.</div></div>
+      <button type="button" class="btn bad" id="s-delete">Delete...</button>
+    </section>
+    <div class="about"><span>Sterling Quest Sync <span id="s-ver"></span>. Built by Kael with the help of Claude Opus.</span><span><a href="#" data-open="privacy">Privacy</a> · <a href="#" data-open="repo">Source</a> · <a href="#" data-open="issues">Report a bug</a></span></div>
+  </main>
+</div>
+
+<!-- Dialog -->
+<div class="scrim" id="scrim" hidden>
+  <div class="dialog framed" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <h1 id="dlg-title"></h1>
+    <div id="dlg-body"></div>
+    <div class="row end" id="dlg-btns"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

@@ -37,6 +37,39 @@ pub struct State {
     /// Last upload per slot, keyed "from>to".
     pub sent: BTreeMap<String, Sent>,
     pub last_sync: Option<i64>,
+    /// The server's pairings as of the last sync, without keys, for the window.
+    #[serde(default)]
+    pub pairs: Vec<PairView>,
+}
+
+/// A pairing as the window shows it. Never carries keys.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PairView {
+    pub id: String,
+    pub my_guid: String,
+    pub partner_guid: String,
+    pub partner_name: String,
+    pub partner_realm: String,
+    pub active: bool,
+    pub ended_reason: Option<String>,
+    pub created_at: i64,
+    pub ended_at: Option<i64>,
+}
+
+impl From<&Pairing> for PairView {
+    fn from(p: &Pairing) -> Self {
+        PairView {
+            id: p.id.clone(),
+            my_guid: p.my_guid.clone(),
+            partner_guid: p.partner_guid.clone(),
+            partner_name: p.partner_name.clone(),
+            partner_realm: p.partner_realm.clone(),
+            active: p.status == "active" && p.ended_at.is_none(),
+            ended_reason: p.ended_reason.clone(),
+            created_at: p.created_at,
+            ended_at: p.ended_at,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -48,6 +81,10 @@ pub struct Report {
     /// Partners in the game with no live pairing yet (from, to).
     pub not_paired: Vec<(String, String)>,
     pub received: usize,
+    /// (from, to) for each copy that arrived.
+    pub received_from: Vec<(String, String)>,
+    /// (from, to) for each copy that went up.
+    pub sent_to: Vec<(String, String)>,
     pub ended: Vec<String>,
     pub inbox_written: bool,
     pub skipped: Vec<String>,
@@ -208,6 +245,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
             match api.put_slot(&c.guid, to, pk, c.saved, c.proto) {
                 Ok(Upload::Saved(seq)) => {
                     rep.uploaded += 1;
+                    rep.sent_to.push((c.guid.clone(), to.to_string()));
                     st.sent.insert(k, Sent { game_time: c.saved, hash: h, seq });
                 }
                 Ok(Upload::Unchanged(seq)) => {
@@ -258,6 +296,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
             let ip = InPacket { seq: p.seq, from: p.from_guid.clone(), kind, time: p.game_time, proto: p.proto, data: p.packet.clone() };
             if st.inbox.put_packet(&p.to_guid, ip) {
                 rep.received += 1;
+                rep.received_from.push((p.from_guid.clone(), p.to_guid.clone()));
             }
         }
         st.since = st.since.max(page.next);
@@ -278,6 +317,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
         }
     }
     st.inbox.chars.retain(|g, c| !c.packets.is_empty() || !c.pairs.is_empty() || mine.contains(g));
+    st.pairs = pairings.iter().map(PairView::from).collect();
 
     // 6. Write the inbox (backup first), then commit the state.
     if st.inbox != before || !companion::is_installed(fs_) {
