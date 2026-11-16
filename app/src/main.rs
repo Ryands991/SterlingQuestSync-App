@@ -960,7 +960,7 @@ fn background(app: AppHandle) {
         use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
         SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
     }
-    std::thread::sleep(Duration::from_secs(8));
+    std::thread::sleep(Duration::from_secs(3));
     let (rewatch_tx, rewatch_rx) = channel::<()>();
     *app.state::<AppState>().rewatch.lock().unwrap() = Some(rewatch_tx);
     let mut game = GameCheck::default();
