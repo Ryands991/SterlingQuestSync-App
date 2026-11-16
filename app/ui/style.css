@@ -145,6 +145,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .ptag { flex: 0 0 34px; font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--gold); }
 .ico { flex: 0 0 30px; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; }
 .ico:hover, .ico:focus-visible { border-color: var(--brass-hi); color: var(--gold); }
+.ico.star { border-color: transparent; font-size: 18px; }
+.ico.star.on { color: var(--gold); }
+.ico-gap { flex: 0 0 30px; }
+.plist.flat { background: transparent; border: 0; padding: 0; }
+.plist.flat .prow { padding: 9px 4px; }
+.hfoot { margin-top: 10px; align-items: center; }
 .c-WARRIOR { color: #c69b6d; } .c-PALADIN { color: #f48cba; } .c-HUNTER { color: #aad372; } .c-ROGUE { color: #fff468; }
 .c-PRIEST { color: #ffffff; } .c-SHAMAN { color: #0070dd; } .c-MAGE { color: #3fc7eb; } .c-WARLOCK { color: #8788ee; }
 .c-DRUID { color: #ff7c0a; } .c-DEATHKNIGHT { color: #c41e3a; } .c-MONK { color: #00ff98; } .c-DEMONHUNTER { color: #a330c9; } .c-EVOKER { color: #33937f; }

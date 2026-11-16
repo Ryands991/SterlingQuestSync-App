@@ -251,51 +251,26 @@ function renderHome(c) {
     $("sterling-update").textContent = "Update";
   } else card.hidden = true;
 
+  // Same rows as the Partners page: favourites (up to 5), or the first few until some are starred.
   const hp = $("h-partners"); hp.replaceChildren();
-  const list = c ? c.partners.filter((p) => !hidden.has(p.pairing_id) && (p.active || p.ended_reason === "replaced")) : [];
-  if (!list.length && !(c && c.unpaired.length)) {
-    hp.append(el("div", "empty", "No partners yet."));
-    const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); hp.append(b);
+  const all = c ? partnerRows(c) : [];
+  const favs = all.filter((r) => r.fav);
+  if (!all.length) {
+    hp.append(el("div", "empty", c ? "No partners yet." : "Select a character to start."));
+    if (c) { const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); hp.append(b); }
+  } else {
+    const box = el("div", "plist flat");
+    for (const r of (favs.length ? favs : all.slice(0, 3))) box.append(prow(r.opts));
+    hp.append(box);
+    const foot = el("div", "row spread small muted hfoot");
+    foot.append(el("span", "", favs.length ? "" : "Star partners to keep them here."));
+    const more = el("button", "btn small ghost", "All partners (" + all.length + ")"); more.type = "button"; more.onclick = () => go("partners");
+    foot.append(more); hp.append(foot);
   }
-  for (const p of list.slice(0, 5)) {
-    const row = el("div", "li"); const left = el("div");
-    left.append(el("div", "n", p.name));
-    if (!p.active) {
-      left.append(el("div", "small bad-t", "Missing key, resync"));
-      const b = el("button", "btn small", "Resync"); b.type = "button"; b.onclick = () => go("pair");
-      row.append(left, b);
-    } else {
-      left.append(el("div", "small muted", p.last_copy ? "Copy from " + ago(p.last_copy) : "No copy yet"));
-      row.append(left, p.last_copy ? el("span", p.applied ? "small good-t" : "small muted", p.applied ? "In game" : "Waiting for /reload") : el("span"));
-    }
-    hp.append(row);
-  }
-
-  if (c && c.unpaired.length) hp.append(unpairedNote(c));
 
   const hr = $("h-recent"); hr.replaceChildren();
   if (!S.activity.length) hr.append(el("div", "empty", "Nothing yet."));
   for (const a of S.activity.slice(0, 5)) hr.append(eventRow(a));
-}
-
-// Sterling partners with no pairing in the app yet (auto-pairing usually handles them).
-function unpairedNote(c) {
-  const box = el("div", "unpaired");
-  const named = c.unpaired.map((u) => u.name).filter(Boolean);
-  const n = c.unpaired.length;
-  const list = named.length === n ? named.join(", ").replace(/, ([^,]*)$/, " and $1") : "";
-  const head = list
-    ? "Sterling also syncs with " + list + ". " + "They aren't paired in the app yet."
-    : n + (n === 1 ? " of your Sterling partners isn't" : " of your Sterling partners aren't") + " paired in the app yet.";
-  box.append(el("div", "small", head));
-  const by = (k) => c.unpaired.filter((u) => u.app === k).length;
-  const lines = [];
-  if (by("yes")) lines.push(by("yes") === n ? "They have the app, so it pairs on its own next time you're both online in game." : by("yes") + " of them have the app and will pair on their own when you're both online.");
-  if (by("no")) lines.push(by("no") === n ? "They don't have the app yet. Ask them to install Sterling Quest Sync." : by("no") + " don't have the app yet.");
-  if (by("unknown")) lines.push(by("unknown") === n ? "Whether they have the app shows once you're both online in game." : by("unknown") + " not seen in game yet.");
-  box.append(el("div", "small muted", lines.join(" ")));
-  const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); box.append(b);
-  return box;
 }
 
 function eventRow(a) {
@@ -328,6 +303,18 @@ function prow(o) {
   const r = el("div", "pr");
   if (o.right) { if (o.right[0]) r.append(el("div", "s " + (o.rightCls || ""), o.right[0])); if (o.right[1]) r.append(o.right[1]); }
   row.append(r);
+  if (o.star) {
+    const on = o.star.on;
+    const b = el("button", "ico star" + (on ? " on" : ""), on ? "\u2605" : "\u2606"); b.type = "button";
+    b.title = on ? "Remove from favourites" : "Add to favourites";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.onclick = () => busy(b, async () => {
+      const ok = await call("set_favorite", { partner: o.star.guid, on: !on });
+      if (ok === false) toast("You can favourite up to 5 partners.", true);
+    });
+    row.append(b);
+  }
+  else if (o.menu && !o.you) row.append(el("span", "ico-gap"));
   if (o.menu) {
     const b = el("button", "ico", "⋯"); b.type = "button"; b.title = "More"; b.setAttribute("aria-label", "More for " + (o.name || "partner"));
     b.onclick = o.menu; row.append(b);
@@ -341,32 +328,17 @@ function lastTime(...ts) {
   return t ? "synced " + ago(t) : "not synced yet";
 }
 
-function renderPartners(c) {
-  $("p-sub").replaceChildren();
-  const you = $("p-you"); you.replaceChildren();
-  const body = $("p-rows"); body.replaceChildren();
-  $("p-count").textContent = c ? liveCount(c) + " / 10" : "";
-  if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
-  const linked = c.partners.filter((p) => p.active).length;
-  const inSterling = c.unpaired.length + linked;
-  $("p-sub").append(inSterling ? linked + " of " + inSterling + " syncing through the app." : "Syncing with nobody yet.");
-
-  const look = c.look || {};
-  const race = [look.race, CLASS_NAMES[look.class]].filter(Boolean).join(" ");
-  you.append(prow({
-    you: true, name: c.name, look,
-    extra: [race, (c.sterling || S.sterling_version) ? "Sterling " + (c.sterling || S.sterling_version) : "", "App " + S.version],
-    right: c.ready ? ["Ready to sync", "save waiting"] : ["Up to date", S.last_sync ? "synced " + ago(S.last_sync) : ""],
-    rightCls: c.ready ? "s-wait" : "s-ok",
-  }));
-
+// Every partner row for a character: favourites first (in the order starred), then live pairs,
+// Sterling partners not paired in the app yet, and ended pairs.
+function partnerRows(c) {
+  const favs = c.favs || [];
+  const star = (guid) => ({ guid, on: favs.includes(guid) });
+  const rows = [];
   const unpaired = new Set(c.unpaired.map((u) => u.guid));
   const list = c.partners.filter((p) => !hidden.has(p.pairing_id) && !(!p.active && unpaired.has(p.guid)));
-  if (!list.length && !c.unpaired.length) body.append(el("div", "empty", "No partners yet. Pair a friend to start."));
-
   for (const p of list.filter((p) => p.active)) {
-    body.append(prow({
-      name: p.name, look: p.look,
+    rows.push({ guid: p.guid, opts: {
+      name: p.name, look: p.look, star: star(p.guid),
       status: p.last_copy ? (p.applied ? "Syncing" : "Syncing, /reload to see it") : "Paired, no copy yet",
       statusCls: p.last_copy ? "s-ok" : "",
       right: [null, lastTime(p.last_copy, p.look && p.look.seen)],
@@ -374,25 +346,25 @@ function renderPartners(c) {
         const ok = await dialog("Stop syncing with " + ((p.look && p.look.nick) || p.name) + "?", [para("Their copies stop coming in and yours stop going out. You can pair again later with a new code.", "muted")], [["Cancel", false, "ghost"], ["Stop syncing", true, "bad"]]);
         if (ok) busy(null, () => call("end_pairing", { id: p.pairing_id }));
       },
-    }));
+    } });
   }
   for (const u of c.unpaired) {
     const [status, cls] = u.offered ? ["Pairing on its own", "s-wait"]
       : u.app === "yes" ? ["Has the app, not paired", "s-wait"]
       : u.app === "no" ? ["Doesn't have the app yet", "s-bad"]
       : ["Not seen yet", ""];
-    body.append(prow({
-      name: u.name, look: u.look, status, statusCls: cls, right: [null, lastTime(u.look && u.look.seen)],
+    rows.push({ guid: u.guid, opts: {
+      name: u.name, look: u.look, status, statusCls: cls, star: star(u.guid), right: [null, lastTime(u.look && u.look.seen)],
       menu: async () => {
         const go2 = await dialog((u.look && u.look.nick) || u.name || "Sterling partner", [para(u.app === "no" ? "They need Sterling Quest Sync installed first. Once they have it, pairing happens on its own when you're both online in game." : "This usually pairs on its own when you're both online in game. You can also pair now with a code.", "muted")], [["Close", false, "ghost"], ["Pair a friend", true]]);
         if (go2) go("pair");
       },
-    }));
+    } });
   }
   for (const p of list.filter((p) => !p.active)) {
     const replaced = p.ended_reason === "replaced";
     const why = replaced ? "Missing key, resync" : p.ended_reason === "deleted" ? "Account deleted" : "Stopped syncing";
-    body.append(prow({
+    rows.push({ guid: p.guid, opts: {
       name: p.name, look: p.look, dim: !replaced,
       status: why, statusCls: replaced ? "s-bad" : "",
       right: [null, p.ended_at ? "ended " + ago(p.ended_at) : ""],
@@ -403,8 +375,35 @@ function renderPartners(c) {
         if (v === "pair") go("pair");
         if (v === "hide") { hidden.add(p.pairing_id); try { localStorage.setItem("hiddenPairs", JSON.stringify([...hidden])); } catch (_) {} renderApp(); }
       },
-    }));
+    } });
   }
+  for (const r of rows) r.fav = !!(r.opts.star && r.opts.star.on);
+  const rank = (r) => (r.fav ? favs.indexOf(r.guid) : 99);
+  return rows.map((r, i) => [r, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map((x) => x[0]);
+}
+
+function renderPartners(c) {
+  $("p-sub").replaceChildren();
+  const you = $("p-you"); you.replaceChildren();
+  const body = $("p-rows"); body.replaceChildren();
+  $("p-count").textContent = c ? liveCount(c) + " / 10" : "";
+  if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
+  const linked = c.partners.filter((p) => p.active).length;
+  const inSterling = c.unpaired.length + linked;
+  $("p-sub").append(inSterling ? linked + " of " + inSterling + " syncing through the app. Star up to 5 favourites; they stay on top here, on Home and in game." : "Syncing with nobody yet.");
+
+  const look = c.look || {};
+  const race = [look.race, CLASS_NAMES[look.class]].filter(Boolean).join(" ");
+  you.append(prow({
+    you: true, name: c.name, look,
+    extra: [race, (c.sterling || S.sterling_version) ? "Sterling " + (c.sterling || S.sterling_version) : "", "App " + S.version],
+    right: c.ready ? ["Ready to sync", "save waiting"] : ["Up to date", S.last_sync ? "synced " + ago(S.last_sync) : ""],
+    rightCls: c.ready ? "s-wait" : "s-ok",
+  }));
+
+  const rows = partnerRows(c);
+  if (!rows.length) body.append(el("div", "empty", "No partners yet. Pair a friend to start."));
+  for (const r of rows) body.append(prow(r.opts));
 }
 
 let codesFor = null, openCodes = [], latestId = null;

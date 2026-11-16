@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{Api, Character, Pairing, Upload};
 use crate::companion;
-use crate::formats::{valid_guid, AppInfo, valid_packet, InOffer, PartnerApp, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_CODE, RE_PAIR_KEY};
+use crate::formats::{valid_guid, AppInfo, valid_packet, Favs, InOffer, PartnerApp, MAX_FAVS, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_CODE, RE_PAIR_KEY};
 use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
@@ -50,6 +50,9 @@ pub struct State {
     /// Auto-pairing: codes from partners already handled (a short hash each), so they're tried once.
     #[serde(default)]
     pub tried: BTreeSet<String>,
+    /// Favourite partners per character (shared with Sterling; newest change wins).
+    #[serde(default)]
+    pub favs: BTreeMap<String, Favs>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -371,6 +374,55 @@ fn offer_codes(api: &dyn Api, st: &mut State, rep: &mut Report, outboxes: &[Outb
     }
 }
 
+/// Favourites changed in game more recently than in the app replace the app's list; the app's list
+/// goes into the inbox so Sterling can take it when it's the newer one.
+fn take_favs(st: &mut State, outboxes: &[Outbox]) {
+    for c in outboxes.iter().flat_map(|o| &o.characters) {
+        if let Some(f) = &c.favs {
+            if st.favs.get(&c.guid).is_none_or(|mine| f.change > mine.change) {
+                st.favs.insert(c.guid.clone(), f.clone());
+            }
+        }
+    }
+    let targets: Vec<String> = st.favs.keys().cloned().collect();
+    for g in targets {
+        let f = st.favs.get(&g).cloned();
+        st.inbox.set_favs(&g, f);
+    }
+}
+
+/// Star or unstar a partner in the app. Writes the inbox right away (no network needed), so the game
+/// picks it up at the next /reload. Returns false when 5 are already starred.
+pub fn set_favorite(fs_: &SafeFs, state: &mut State, me: &str, partner: &str, on: bool, now: i64) -> Result<bool> {
+    if !valid_guid(me) || !valid_guid(partner) || me == partner {
+        return Err(Error::Refused("bad character".into()));
+    }
+    let mut st = state.clone();
+    let cur = st.favs.get(me).cloned().unwrap_or_default();
+    let mut list = cur.list.clone();
+    if on {
+        if list.iter().any(|g| g == partner) {
+            return Ok(true);
+        }
+        if list.len() >= MAX_FAVS {
+            return Ok(false);
+        }
+        list.push(partner.to_string());
+    } else {
+        list.retain(|g| g != partner);
+    }
+    // Always newer than anything seen, even if this PC's clock is a little behind the game's.
+    let f = Favs::clean(list, now.max(cur.change + 1));
+    st.favs.insert(me.to_string(), f.clone());
+    if st.inbox.set_favs(me, Some(f)) {
+        companion::backup_saved_variables(fs_, "favourites")?;
+        companion::write_inbox(fs_, &st.inbox, now)?;
+    }
+    save_state(fs_, &st)?;
+    *state = st;
+    Ok(true)
+}
+
 /// One full pass. `now` is the wall clock, used only for `written` and `last_sync`.
 /// `app` carries the versions the add-on shows; None leaves what the inbox has.
 pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox], app: Option<AppInfo>, now: i64) -> Result<Report> {
@@ -463,6 +515,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
     // 4. Downloads, page by page.
     let before = st.inbox.clone();
     offer_codes(api, &mut st, &mut rep, outboxes, &pairings, now);
+    take_favs(&mut st, outboxes);
     if let Some(a) = app {
         st.inbox.app = Some(a);
     }
@@ -677,6 +730,7 @@ mod tests {
                 codes: Default::default(),
                 look: Default::default(),
                 sterling: None,
+                favs: None,
             }],
             skipped: vec![],
         }
@@ -815,6 +869,44 @@ mod tests {
         let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_000 + 86_400 - 3600).unwrap();
         assert_eq!(r.auto_offered, 1);
         assert_eq!(api.cancelled.borrow().as_slice(), ["c1"]);
+    }
+
+    #[test]
+    fn favourites_newest_side_wins() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        let mut st = load_state(&fs_);
+        // Starred in the app.
+        assert!(set_favorite(&fs_, &mut st, ME, BRAN, true, 1_794_770_000).unwrap());
+        let lua = fs::read_to_string(fs_.root(Root::Companion).join("Inbox.lua")).unwrap();
+        assert!(lua.contains(&format!("favs = {{ \"{BRAN}\", }}")) && lua.contains("favs_change = 1794770000"));
+        // An older list from the game doesn't undo it.
+        let mut o = outbox(1_794_770_000, "C", None);
+        o.characters[0].favs = Some(Favs { list: vec![ALT.into()], change: 1_794_760_000 });
+        sync(&api, &fs_, &mut st, &[o.clone()], None, 1_794_770_100).unwrap();
+        assert_eq!(st.favs[ME].list, vec![BRAN.to_string()]);
+        // A newer one from the game replaces it, and the inbox follows.
+        o.characters[0].favs = Some(Favs { list: vec![ALT.into()], change: 1_794_780_000 });
+        sync(&api, &fs_, &mut st, &[o], None, 1_794_780_100).unwrap();
+        assert_eq!(st.favs[ME].list, vec![ALT.to_string()]);
+        assert_eq!(st.inbox.chars[ME].favs.as_ref().unwrap().list, vec![ALT.to_string()]);
+        // A change in the app after that is newer again, even with a slow PC clock.
+        set_favorite(&fs_, &mut st, ME, BRAN, true, 1_794_770_000).unwrap();
+        assert_eq!(st.favs[ME].change, 1_794_780_001);
+        assert_eq!(st.favs[ME].list, vec![ALT.to_string(), BRAN.to_string()]);
+    }
+
+    #[test]
+    fn at_most_five_favourites() {
+        let (_t, fs_) = setup();
+        let mut st = load_state(&fs_);
+        for i in 0..5 {
+            assert!(set_favorite(&fs_, &mut st, ME, &format!("Player-6800-0000000{i}"), true, 1_794_770_000 + i).unwrap());
+        }
+        assert!(!set_favorite(&fs_, &mut st, ME, "Player-6800-00000009", true, 1_794_770_010).unwrap());
+        assert_eq!(st.favs[ME].list.len(), 5);
+        set_favorite(&fs_, &mut st, ME, "Player-6800-00000002", false, 1_794_770_020).unwrap();
+        assert_eq!(st.favs[ME].list.len(), 4);
     }
 
     #[test]

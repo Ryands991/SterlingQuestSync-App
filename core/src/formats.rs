@@ -114,6 +114,32 @@ pub struct CharacterOut {
     /// Sterling's own version, for the window.
     #[serde(default)]
     pub sterling: Option<String>,
+    /// Favourite partners as Sterling last saved them, with when they last changed.
+    #[serde(default)]
+    pub favs: Option<Favs>,
+}
+
+pub const MAX_FAVS: usize = 5;
+
+/// Favourite partners (up to 5, in order) and when the list last changed. Whichever side changed it
+/// last wins: Sterling through the outbox, the app through the inbox.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Favs {
+    pub list: Vec<String>,
+    pub change: i64,
+}
+
+impl Favs {
+    /// Keeps only good GUIDs, no repeats, at most 5.
+    pub fn clean(list: impl IntoIterator<Item = String>, change: i64) -> Favs {
+        let mut out: Vec<String> = Vec::new();
+        for g in list {
+            if valid_guid(&g) && !out.contains(&g) && out.len() < MAX_FAVS {
+                out.push(g);
+            }
+        }
+        Favs { list: out, change }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -232,7 +258,18 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
                 }
             }
         }
+        let favs = match (c.get("favs").and_then(Value::as_table), int(c, "favs_change")) {
+            (Some(t), Some(ch)) if valid_time(ch) => {
+                Some(Favs::clean(t.list.iter().filter_map(|v| v.as_str().map(String::from)).filter(|g| g != guid), ch))
+            }
+            (Some(_), _) => {
+                out.skipped.push(format!("{guid}: favourites without a good change time"));
+                None
+            }
+            _ => None,
+        };
         out.characters.push(CharacterOut {
+            favs,
             look: look(c),
             sterling: text(c, "sterling").filter(|v| valid_version(v)).map(String::from),
             codes,
@@ -289,6 +326,9 @@ pub struct InChar {
     /// Auto-pairing: codes for Sterling to hand to these partners in game.
     #[serde(default)]
     pub offers: Vec<InOffer>,
+    /// Favourite partners set in the app, for Sterling to take when newer than its own.
+    #[serde(default)]
+    pub favs: Option<Favs>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -305,6 +345,15 @@ impl Inbox {
             return false;
         }
         c.offers = offers;
+        true
+    }
+
+    pub fn set_favs(&mut self, to: &str, favs: Option<Favs>) -> bool {
+        let c = self.chars.entry(to.to_string()).or_default();
+        if c.favs == favs {
+            return false;
+        }
+        c.favs = favs;
         true
     }
 }
@@ -383,6 +432,11 @@ fn check_inbox(inbox: &Inbox) -> Result<()> {
                 return bad("offer");
             }
         }
+        if let Some(f) = &c.favs {
+            if f.list.len() > MAX_FAVS || !f.list.iter().all(|g| valid_guid(g)) || !valid_time(f.change) {
+                return bad("favourites");
+            }
+        }
         for pr in &c.pairs {
             if !valid_guid(&pr.partner) || pr.change < 0 {
                 return bad("pair");
@@ -450,7 +504,15 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String> {
         for o in &c.offers {
             s.push_str(&format!("        {{ partner = \"{}\", code = \"{}\", expires = {} }},\n", o.partner, o.code, o.expires));
         }
-        s.push_str("      },\n    },\n");
+        s.push_str("      },\n");
+        if let Some(f) = &c.favs {
+            s.push_str("      favs = {");
+            for g in &f.list {
+                s.push_str(&format!(" \"{g}\","));
+            }
+            s.push_str(&format!(" }},\n      favs_change = {},\n", f.change));
+        }
+        s.push_str("    },\n");
     }
     s.push_str("  },\n}\n");
     Ok(s)
@@ -563,6 +625,19 @@ mod tests {
         assert_eq!(p.race.as_deref(), Some("Night Elf"));
         assert_eq!(p.nick.as_deref(), Some("Bran"));
         assert_eq!(p.seen, Some(1794770100));
+    }
+
+    #[test]
+    fn reads_favourites_up_to_five() {
+        let gs: Vec<String> = (0..7).map(|i| format!("\"Player-6800-0000000{i}\"")).collect();
+        let text = format!(
+            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"favs\"] = {{ \"bad\", \"{ME}\", \"Player-6800-00000000\", {} }}, [\"favs_change\"] = 1794770000 }} }} }}",
+            gs.join(", ")
+        );
+        let f = parse_outbox(&text).unwrap().characters[0].favs.clone().unwrap();
+        assert_eq!(f.list.len(), 5, "bad GUID, self and repeats dropped, capped at 5");
+        assert_eq!(f.list[0], "Player-6800-00000000");
+        assert_eq!(f.change, 1794770000);
     }
 
     #[test]

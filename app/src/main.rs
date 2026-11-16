@@ -226,6 +226,8 @@ struct CharStatus {
     saved: Option<i64>,
     ready: bool,
     look: Look,
+    /// Favourite partners, in order (up to 5).
+    favs: Vec<String>,
     /// Sterling's version as this character last saved it.
     sterling: Option<String>,
     partners: Vec<PartnerStatus>,
@@ -345,6 +347,7 @@ fn build_status(st: &AppState) -> Status {
                 })
                 .collect();
             characters.push(CharStatus {
+                favs: sess.state.favs.get(&guid).map(|f| f.list.clone()).unwrap_or_default(),
                 look: me.map(|c| c.look.clone()).unwrap_or_default(),
                 sterling: me.and_then(|c| c.sterling.clone()),
                 unpaired,
@@ -691,6 +694,19 @@ fn set_options(
     }
     emit_status(&app);
     Ok(())
+}
+
+/// Star or unstar a partner of the selected character. Ok(false) means 5 are already starred.
+#[tauri::command]
+fn set_favorite(app: AppHandle, st: State<'_, AppState>, partner: String, on: bool) -> Result<bool, String> {
+    let ok = {
+        let mut inner = st.inner.lock().unwrap();
+        let me = inner.settings.character.clone().ok_or("Select a character first.")?;
+        let sess = inner.session.as_mut().ok_or("Pick your game folder first.")?;
+        engine::set_favorite(&sess.fs, &mut sess.state, &me, &partner, on, now()).map_err(msg)?
+    };
+    emit_status(&app);
+    Ok(ok)
 }
 
 // ------------------------------------------------------------------ commands: pairing and account
@@ -1109,6 +1125,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             status,
+            set_favorite,
             discover_games,
             use_found_game,
             pick_game_folder,
