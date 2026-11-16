@@ -953,6 +953,14 @@ fn quit(app: AppHandle) {
 
 /// Watches for saves and the game closing. Cheap: one file watcher, a process check every 15 s.
 fn background(app: AppHandle) {
+    // Stay out of the game's way: this thread runs at background CPU and disk priority, and waits a
+    // few seconds after launch so the window and the game don't fight for the PC at the same moment.
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN};
+        SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN);
+    }
+    std::thread::sleep(Duration::from_secs(8));
     let (rewatch_tx, rewatch_rx) = channel::<()>();
     *app.state::<AppState>().rewatch.lock().unwrap() = Some(rewatch_tx);
     let mut game = GameCheck::default();
