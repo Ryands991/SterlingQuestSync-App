@@ -297,7 +297,11 @@ function prow(o) {
   if (nick && o.name && nick !== o.name) bits.push(o.name);
   if (o.look && o.look.level) bits.push("Lvl " + o.look.level);
   for (const b of o.extra || []) if (b) bits.push(b);
-  bits.forEach((b, i) => { if (i) line.append(" · "); line.append(b); });
+  // Each piece stays whole; a narrow list wraps only between pieces.
+  const piece = (b, extra) => { const w = el("span", "bit" + (extra || "")); w.append(b); return w; };
+  bits.forEach((b, i) => { if (i) line.append(" · "); line.append(piece(b)); });
+  // In a narrow list (Home) the right column folds into this line; see .pl-time in the stylesheet.
+  if (o.right && o.right[1] && !o.you) { const t = el("span", "pl-time"); t.append(" · ", piece(o.right[1])); line.append(t); }
   m.append(line);
   row.append(m);
   const r = el("div", "pr");
@@ -386,7 +390,8 @@ function renderPartners(c) {
   $("p-sub").replaceChildren();
   const you = $("p-you"); you.replaceChildren();
   const body = $("p-rows"); body.replaceChildren();
-  $("p-count").textContent = c ? liveCount(c) + " / 10" : "";
+  // Same count as Sterling's list in game: every current partner, paired in the app or not.
+  $("p-count").textContent = c ? (c.partners.filter((p) => p.active).length + c.unpaired.length) + " / 10" : "";
   if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
   const linked = c.partners.filter((p) => p.active).length;
   const inSterling = c.unpaired.length + linked;

@@ -151,6 +151,16 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .plist.flat { background: transparent; border: 0; padding: 0; }
 .plist.flat .prow { padding: 9px 4px; }
 .hfoot { margin-top: 10px; align-items: center; }
+/* Narrow lists (the Home card): wrap the status line and fold the time into it. */
+.plist { container-type: inline-size; }
+.pl-time { display: none; }
+.pl .bit { white-space: nowrap; }
+.ico-gap { flex: 0 0 30px; height: 30px; }
+@container (max-width: 560px) {
+  .pl { white-space: normal; overflow: visible; }
+  .pr { display: none; }
+  .pl-time { display: inline; }
+}
 .c-WARRIOR { color: #c69b6d; } .c-PALADIN { color: #f48cba; } .c-HUNTER { color: #aad372; } .c-ROGUE { color: #fff468; }
 .c-PRIEST { color: #ffffff; } .c-SHAMAN { color: #0070dd; } .c-MAGE { color: #3fc7eb; } .c-WARLOCK { color: #8788ee; }
 .c-DRUID { color: #ff7c0a; } .c-DEATHKNIGHT { color: #c41e3a; } .c-MONK { color: #00ff98; } .c-DEMONHUNTER { color: #a330c9; } .c-EVOKER { color: #33937f; }
