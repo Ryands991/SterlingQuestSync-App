@@ -58,7 +58,7 @@ async function copy(text) {
 }
 function currentChar() {
   if (!S || !S.characters.length) return null;
-  return S.characters.find((c) => c.guid === S.character) || S.characters[0];
+  return S.characters.find((c) => c.guid === S.character) || null; // never picked for you
 }
 function liveCount(c) { return c ? c.partners.filter((p) => p.active).length : 0; }
 
@@ -181,7 +181,10 @@ function renderApp() {
   const sel = $("char"); const c = currentChar();
   sel.replaceChildren();
   if (!S.characters.length) { const o = el("option", "", "No characters yet"); sel.append(o); sel.disabled = true; }
-  else { sel.disabled = false; for (const ch of S.characters) { const o = el("option", "", ch.name); o.value = ch.guid; if (c && ch.guid === c.guid) o.selected = true; sel.append(o); } }
+  else {
+    sel.disabled = false;
+    if (!c) { const o = el("option", "", "Select a character"); o.value = ""; o.disabled = true; o.selected = true; sel.append(o); }
+    for (const ch of S.characters) { const o = el("option", "", ch.name); o.value = ch.guid; if (c && ch.guid === c.guid) o.selected = true; sel.append(o); } }
   $("thispc").textContent = "This PC: " + S.pc_label;
   for (const n of document.querySelectorAll(".charname")) n.textContent = c ? c.name : "your character";
 
@@ -197,13 +200,28 @@ function renderHome(c) {
   $("sync").disabled = S.busy || !c;
   $("sync").textContent = S.busy ? "Syncing..." : "Sync now";
   const dot = $("h-dot");
-  if (!c) {
+  // No character chosen: Home shows only what to do next.
+  $("home-rest").hidden = !c;
+  $("hero-act").hidden = !c;
+  $("h-last").hidden = !c;
+  if (!c && S.characters.length) {
     $("h-char").textContent = "WELCOME";
-    $("h-title").textContent = "Waiting for your first save";
+    $("h-title").textContent = "Select a character to start";
+    dot.className = "dot gold";
+    $("h-line").textContent = "Pick one in the Character list at the bottom left.";
+  } else if (!c) {
+    $("h-char").textContent = "WELCOME";
     dot.className = "dot";
-    $("h-line").textContent = S.companion_installed
-      ? "Log in to WoW with Sterling enabled. Your characters show up here after you log out or /reload."
-      : "The SterlingQuestSync add-on isn't in your AddOns folder. Pick your game folder again in Settings.";
+    if (!S.companion_installed) {
+      $("h-title").textContent = "Add-on missing";
+      $("h-line").textContent = "The SterlingQuestSync add-on isn't in your AddOns folder. Pick your game folder again in Settings.";
+    } else if (!S.sterling_version) {
+      $("h-title").textContent = "Sterling isn't installed";
+      $("h-line").textContent = "Install Sterling Quest Tracker in this game folder. Your characters show up here once Sterling has something to share.";
+    } else {
+      $("h-title").textContent = "Waiting for Sterling";
+      $("h-line").textContent = "Nothing to share yet. Your characters show up here once Sterling has a copy ready: play with Sterling enabled, then /reload or log out. Sterling needs a small update to work with this app, coming soon.";
+    }
   } else {
     $("h-char").textContent = c.name.toUpperCase();
     if (S.busy) { $("h-title").textContent = "Syncing..."; dot.className = "dot gold"; $("h-line").textContent = "Talking to the server."; }

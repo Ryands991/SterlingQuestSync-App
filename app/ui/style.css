@@ -5,9 +5,9 @@
 @font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-700-normal.woff2") format("woff2"); font-weight: 700; }
 
 :root {
-  --bg: #3a2e25; --bar: #31271f; --side: #33291f; --card: #45372c; --raised: #574535; --well: #31271f;
-  --line: #6a5232; --line2: #574535; --brass: #8b6b3d; --brass-hi: #ecca86; --btn: #b8893f; --btn-in: #8a6328;
-  --gold: #d8b36a; --text: #efe4d3; --muted: #bfae96; --good: #7fc27a; --bad: #e8907e; --bad-bg: #46291f; --bad-line: #6a3a2c;
+  --bg: #272019; --bar: #211a15; --side: #231c16; --card: #322820; --raised: #3f3329; --well: #1f1813;
+  --line: #544029; --line2: #41332a; --brass: #765a33; --brass-hi: #d1b06f; --btn: #9e7536; --btn-in: #735222;
+  --gold: #cca65d; --text: #e4dac8; --muted: #a89880; --good: #7fc27a; --bad: #e8907e; --bad-bg: #40261d; --bad-line: #663829;
   --title: "Spectral SC", Georgia, serif;
 }
 * { box-sizing: border-box; }
@@ -36,7 +36,7 @@ h2 { margin: 0 0 6px; font: 600 18px var(--title); color: var(--gold); }
 .btn { min-height: 40px; padding: 0 16px; border: 1px solid var(--brass); border-radius: 4px; background: var(--raised); color: var(--gold); font: inherit; font-weight: 700; cursor: pointer; }
 .btn:hover { border-color: var(--brass-hi); }
 .btn.primary { border-color: var(--brass-hi); background: var(--btn); color: #2a2018; font: 600 16px var(--title); padding: 0 22px; box-shadow: inset 0 0 0 2px var(--btn-in); }
-.btn.primary:hover { background: #c7984c; }
+.btn.primary:hover { background: #b08643; }
 .btn.primary.big { min-height: 48px; font-size: 18px; padding: 0 28px; }
 .btn.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 400; }
 .btn.small { min-height: 32px; padding: 0 12px; font-size: 13px; }
@@ -52,7 +52,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .row.spread { justify-content: space-between; } .row.end { justify-content: flex-end; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
-.dot.good { background: var(--good); } .dot.bad { background: var(--bad); } .dot.gold { background: var(--gold); box-shadow: 0 0 0 3px #5a4630; width: 9px; height: 9px; }
+.dot.good { background: var(--good); } .dot.bad { background: var(--bad); } .dot.gold { background: var(--gold); box-shadow: 0 0 0 3px #4a3a25; width: 9px; height: 9px; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
 
 /* panels */
@@ -89,10 +89,10 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .app { flex: 1; display: flex; min-height: 0; }
 .side { flex: 0 0 180px; display: flex; flex-direction: column; gap: 2px; padding: 18px 10px 14px; background: var(--side); border-right: 1px solid var(--line); }
 .side > button { text-align: left; min-height: 44px; padding: 0 14px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-.side > button:hover { background: #3c3026; }
+.side > button:hover { background: #2e251d; }
 .side > button[aria-current=page] { border-color: var(--brass); background: var(--card); color: var(--gold); font-weight: 700; }
 .server { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 0 14px 12px; font-size: 13px; font-weight: 600; }
-.charpick { display: flex; flex-direction: column; gap: 6px; padding: 14px 4px 0; border-top: 1px solid #55432f; }
+.charpick { display: flex; flex-direction: column; gap: 6px; padding: 14px 4px 0; border-top: 1px solid var(--line2); }
 .charpick label { padding: 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 1.2px; color: var(--muted); }
 .charpick select { border-color: var(--brass); background: var(--card); font-size: 14px; padding: 0 8px; }
 .charpick .small { padding: 0 10px; font-size: 12px; }
@@ -154,5 +154,6 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .otherlist { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; background: var(--card); }
 .otherlist button { display: flex; justify-content: space-between; gap: 12px; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line2); background: transparent; color: var(--text); font: 13px Consolas, monospace; cursor: pointer; }
 .otherlist button:last-child { border-bottom: 0; }
-.otherlist button:hover { background: #4d3e31; }
+.otherlist button:hover { background: #3a2f25; }
 .otherlist .pill { font: 600 11px "Source Sans 3", sans-serif; letter-spacing: .8px; color: var(--muted); white-space: nowrap; }
+.col-gap16 { display: flex; flex-direction: column; gap: 16px; }
