@@ -24,6 +24,8 @@ pub const MAX_PACKET: usize = 64 * 1024;
 pub static RE_GUID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^Player-\d{1,5}-[0-9A-F]{8}$").unwrap());
 pub static RE_PACKET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9()]+$").unwrap());
 pub static RE_PAIR_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z2-9]{16}$").unwrap());
+/// A pairing code as the server hands it out: XXXX-XXXX-XXXX from its 30-letter alphabet.
+pub static RE_PAIR_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}-[A-HJKMNP-TV-Z2-9]{4}$").unwrap());
 static RE_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\p{L}[\p{L}' -]{0,23}$").unwrap());
 static RE_REALM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}][\p{L}\p{N}' ()-]{0,63}$").unwrap());
 
@@ -45,6 +47,9 @@ pub struct PartnerOut {
     /// Change number for the partner entry (two-way edits, remove wins).
     pub change: i64,
     pub removed: bool,
+    /// Display name, if Sterling wrote one. Shown only in this PC's window; never uploaded.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +65,9 @@ pub struct CharacterOut {
     pub partners: Vec<PartnerOut>,
     /// Last server number Sterling applied per sender GUID (lets the app know what arrived).
     pub applied: BTreeMap<String, i64>,
+    /// Auto-pairing: codes this character received in game from a Sterling partner, by sender GUID.
+    #[serde(default)]
+    pub codes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -140,7 +148,8 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
                     }
                     None => None,
                 };
-                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed });
+                let name = text(p, "name").filter(|n| RE_NAME.is_match(n)).map(String::from);
+                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name });
             }
         }
         let mut applied = BTreeMap::new();
@@ -153,7 +162,21 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
                 }
             }
         }
+        let mut codes = BTreeMap::new();
+        if let Some(ct) = c.get("codes").and_then(Value::as_table) {
+            for (from, v) in &ct.map {
+                let code = v.as_table().and_then(|t| text(t, "code")).or_else(|| v.as_str());
+                if let Some(code) = code {
+                    if valid_guid(from) && from != guid && RE_PAIR_CODE.is_match(code) {
+                        codes.insert(from.clone(), code.to_string());
+                    } else {
+                        out.skipped.push(format!("{guid}: bad pairing code entry"));
+                    }
+                }
+            }
+        }
         out.characters.push(CharacterOut {
+            codes,
             guid: guid.clone(),
             name: name.to_string(),
             realm: realm.to_string(),
@@ -204,6 +227,27 @@ pub struct InPair {
 pub struct InChar {
     pub packets: Vec<InPacket>,
     pub pairs: Vec<InPair>,
+    /// Auto-pairing: codes for Sterling to hand to these partners in game.
+    #[serde(default)]
+    pub offers: Vec<InOffer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InOffer {
+    pub partner: String,
+    pub code: String,
+    pub expires: i64,
+}
+
+impl Inbox {
+    pub fn set_offers(&mut self, to: &str, offers: Vec<InOffer>) -> bool {
+        let c = self.chars.entry(to.to_string()).or_default();
+        if c.offers == offers {
+            return false;
+        }
+        c.offers = offers;
+        true
+    }
 }
 
 /// What the app keeps for the inbox, by target character GUID.
@@ -275,6 +319,11 @@ fn check_inbox(inbox: &Inbox) -> Result<()> {
                 return bad("packet");
             }
         }
+        for o in &c.offers {
+            if !valid_guid(&o.partner) || !RE_PAIR_CODE.is_match(&o.code) || !valid_time(o.expires) {
+                return bad("offer");
+            }
+        }
         for pr in &c.pairs {
             if !valid_guid(&pr.partner) || pr.change < 0 {
                 return bad("pair");
@@ -337,6 +386,10 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String> {
                 status,
                 pr.change
             ));
+        }
+        s.push_str("      },\n      offers = {\n");
+        for o in &c.offers {
+            s.push_str(&format!("        {{ partner = \"{}\", code = \"{}\", expires = {} }},\n", o.partner, o.code, o.expires));
         }
         s.push_str("      },\n    },\n");
     }

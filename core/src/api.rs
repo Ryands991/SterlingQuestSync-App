@@ -159,6 +159,11 @@ pub trait Api {
     fn end_pairing(&self, id: &str) -> Result<()>;
     fn put_slot(&self, from: &str, to: &str, packet: &str, game_time: i64, proto: i64) -> Result<Upload>;
     fn inbox(&self, since: i64) -> Result<InboxPage>;
+    // Auto-pairing uses the same single-use codes as "Pair a friend".
+    fn pair_code(&self, guid: &str) -> Result<Code>;
+    fn cancel_code(&self, id: &str) -> Result<()>;
+    fn peek_code(&self, guid: &str, code: &str) -> Result<Peek>;
+    fn redeem_code(&self, guid: &str, code: &str, replace: bool) -> Result<Redeemed>;
 }
 
 // ------------------------------------------------------------------ HTTP client
@@ -359,6 +364,22 @@ impl Api for Client {
 
     fn inbox(&self, since: i64) -> Result<InboxPage> {
         self.send("GET", &format!("/v1/inbox?since={}", since.max(0)), None)
+    }
+
+    fn pair_code(&self, guid: &str) -> Result<Code> {
+        Client::pair_code(self, guid)
+    }
+
+    fn cancel_code(&self, id: &str) -> Result<()> {
+        Client::cancel_code(self, id)
+    }
+
+    fn peek_code(&self, guid: &str, code: &str) -> Result<Peek> {
+        Client::peek_code(self, guid, code)
+    }
+
+    fn redeem_code(&self, guid: &str, code: &str, replace: bool) -> Result<Redeemed> {
+        Client::redeem_code(self, guid, code, replace)
     }
 }
 

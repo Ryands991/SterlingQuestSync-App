@@ -224,6 +224,16 @@ struct CharStatus {
     saved: Option<i64>,
     ready: bool,
     partners: Vec<PartnerStatus>,
+    /// Sterling partners with no live pairing in the app yet (names only if Sterling wrote them).
+    unpaired: Vec<Unpaired>,
+}
+
+#[derive(Serialize, Clone)]
+struct Unpaired {
+    guid: String,
+    name: Option<String>,
+    /// A code is in the inbox for Sterling to hand over in game.
+    offered: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -304,7 +314,21 @@ fn build_status(st: &AppState) -> Status {
                     }
                 })
                 .collect();
+            let live: Vec<&str> = sess.state.pairs.iter().filter(|p| p.my_guid == guid && p.active).map(|p| p.partner_guid.as_str()).collect();
+            let unpaired: Vec<Unpaired> = outboxes
+                .iter()
+                .flat_map(|o| &o.characters)
+                .filter(|c| c.guid == guid)
+                .flat_map(|c| &c.partners)
+                .filter(|p| !p.removed && !live.contains(&p.guid.as_str()))
+                .map(|p| Unpaired {
+                    guid: p.guid.clone(),
+                    name: p.name.clone(),
+                    offered: sess.state.offers.get(&guid).is_some_and(|m| m.contains_key(&p.guid)),
+                })
+                .collect();
             characters.push(CharStatus {
+                unpaired,
                 ready: ready.contains(&guid),
                 saved: saved.get(guid.as_str()).map(|x| x.0),
                 guid,
@@ -537,6 +561,12 @@ fn describe(inner: &mut Inner, r: &Report) {
     for (f, t) in &r.stale {
         inner.log(format!("Skipped an older save of {} for {}: the server already has a newer one", name(f), name(t)), "");
     }
+    for (_, _, who) in &r.auto_paired {
+        inner.log(format!("Paired with {who} automatically"), "good");
+    }
+    for n in &r.auto_notes {
+        inner.log(n.clone(), "");
+    }
     for id in &r.ended {
         let who = inner.session.as_ref().and_then(|s| s.state.pairs.iter().find(|p| &p.id == id)).map(|p| p.partner_name.clone()).unwrap_or_default();
         inner.log(format!("Stopped syncing with {} (removed in game)", if who.is_empty() { "a partner".into() } else { who }), "");
@@ -544,7 +574,7 @@ fn describe(inner: &mut Inner, r: &Report) {
     if !r.skipped.is_empty() {
         inner.log(format!("Skipped {} item(s) that didn't pass checks", r.skipped.len()), "bad");
     }
-    if r.inbox_written {
+    if r.inbox_written && (!r.received_from.is_empty() || !r.ended.is_empty() || r.auto_offered > 0) {
         inner.log("Updated the inbox. /reload or log in to see it in game.", "");
     }
 }

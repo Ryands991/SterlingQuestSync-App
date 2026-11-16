@@ -253,7 +253,7 @@ function renderHome(c) {
 
   const hp = $("h-partners"); hp.replaceChildren();
   const list = c ? c.partners.filter((p) => !hidden.has(p.pairing_id) && (p.active || p.ended_reason === "replaced")) : [];
-  if (!list.length) {
+  if (!list.length && !(c && c.unpaired.length)) {
     hp.append(el("div", "empty", "No partners yet."));
     const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); hp.append(b);
   }
@@ -271,9 +271,26 @@ function renderHome(c) {
     hp.append(row);
   }
 
+  if (c && c.unpaired.length) hp.append(unpairedNote(c));
+
   const hr = $("h-recent"); hr.replaceChildren();
   if (!S.activity.length) hr.append(el("div", "empty", "Nothing yet."));
   for (const a of S.activity.slice(0, 5)) hr.append(eventRow(a));
+}
+
+// Sterling partners with no pairing in the app yet (auto-pairing usually handles them).
+function unpairedNote(c) {
+  const box = el("div", "unpaired");
+  const named = c.unpaired.map((u) => u.name).filter(Boolean);
+  const n = c.unpaired.length;
+  const list = named.length === n ? named.join(", ").replace(/, ([^,]*)$/, " and $1") : "";
+  const head = list
+    ? "Sterling also syncs with " + list + ". " + "They aren't paired in the app yet."
+    : n + (n === 1 ? " of your Sterling partners isn't" : " of your Sterling partners aren't") + " paired in the app yet.";
+  box.append(el("div", "small", head));
+  box.append(el("div", "small muted", "If they have the app, it pairs on its own next time you're both online in game. Or send a code from Pair a friend."));
+  const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); box.append(b);
+  return box;
 }
 
 function eventRow(a) {
@@ -301,7 +318,16 @@ function renderPartners(c) {
   if (c) $("p-sub").append("Syncing with ", el("b", "", c.name), ". " + liveCount(c) + " of 10.");
   const body = $("p-rows"); body.replaceChildren();
   const list = c ? c.partners.filter((p) => !hidden.has(p.pairing_id)) : [];
-  if (!list.length) { const tr = el("tr"); const td = el("td", "empty", "No partners yet. Pair a friend to start."); td.colSpan = 4; tr.append(td); body.append(tr); }
+  if (!list.length && !(c && c.unpaired.length)) { const tr = el("tr"); const td = el("td", "empty", "No partners yet. Pair a friend to start."); td.colSpan = 4; tr.append(td); body.append(tr); }
+  for (const u of (c ? c.unpaired : [])) {
+    const tr = el("tr");
+    const name = el("td"); name.append(el("div", "n", u.name || "Sterling partner"), el("div", "small muted", "From Sterling"));
+    const st = el("td");
+    if (u.offered) st.append(el("div", "warn-t", "Pairing on its own"), el("div", "small muted", "Next time you're both online in game, if they have the app."));
+    else st.append(el("div", "warn-t", "Not paired in the app"), el("div", "small muted", "They need the app and a pairing code."));
+    const act = el("td"); const b = el("button", "btn small", "Pair"); b.type = "button"; b.onclick = () => go("pair"); act.append(b);
+    tr.append(name, el("td", "muted", "None"), st, act); body.append(tr);
+  }
   for (const p of list) {
     const tr = el("tr");
     const name = el("td"); name.append(el("div", p.active ? "n" : "n muted", p.name), el("div", "small muted", p.realm));

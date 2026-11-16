@@ -12,12 +12,16 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{Api, Character, Pairing, Upload};
 use crate::companion;
-use crate::formats::{valid_guid, AppInfo, valid_packet, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_KEY};
+use crate::formats::{valid_guid, AppInfo, valid_packet, InOffer, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_CODE, RE_PAIR_KEY};
 use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
 pub const STATE_FORMAT: u32 = 1;
 const MAX_INBOX_PAGES: usize = 50;
+/// Auto-pairing: a code is replaced once it has less than this left (codes last 24 hours).
+const OFFER_REFRESH: i64 = 6 * 3600;
+/// Auto-pairing: open codes per character, so "Pair a friend" always has room left.
+const MAX_OFFERS: usize = 8;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Sent {
@@ -40,6 +44,19 @@ pub struct State {
     /// The server's pairings as of the last sync, without keys, for the window.
     #[serde(default)]
     pub pairs: Vec<PairView>,
+    /// Auto-pairing: codes this PC offered, by my GUID, then partner GUID.
+    #[serde(default)]
+    pub offers: BTreeMap<String, BTreeMap<String, Offer>>,
+    /// Auto-pairing: codes from partners already handled (a short hash each), so they're tried once.
+    #[serde(default)]
+    pub tried: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Offer {
+    pub id: String,
+    pub code: String,
+    pub expires: i64,
 }
 
 /// A pairing as the window shows it. Never carries keys.
@@ -88,6 +105,12 @@ pub struct Report {
     pub ended: Vec<String>,
     pub inbox_written: bool,
     pub skipped: Vec<String>,
+    /// Auto-pairing: new codes put in the inbox for Sterling to hand over.
+    pub auto_offered: usize,
+    /// Auto-pairing: (me, partner, partner name) paired this pass.
+    pub auto_paired: Vec<(String, String, String)>,
+    /// Auto-pairing: things the person may need to do by hand, in words.
+    pub auto_notes: Vec<String>,
 }
 
 fn slot_key(from: &str, to: &str) -> String {
@@ -183,6 +206,170 @@ fn pairs_for(pairings: &[Pairing], me: &str) -> Vec<InPair> {
         .collect()
 }
 
+fn tried_key(me: &str, from: &str, code: &str) -> String {
+    hash(&format!("{me}|{from}|{code}"))
+}
+
+/// Network trouble or a busy server: stop auto-pairing for this pass and try again next time.
+fn try_later(e: &Error) -> bool {
+    matches!(e, Error::Offline) || matches!(e, Error::Api { code, .. } if code == "rate_limited" || code == "server_error")
+        || matches!(e, Error::Server(_))
+}
+
+/// Redeems codes from `codes[sender]` in the outbox. Returns true when a pairing was made.
+fn redeem_codes(api: &dyn Api, st: &mut State, rep: &mut Report, outboxes: &[Outbox], pairings: &[Pairing]) -> bool {
+    let mut made = false;
+    for c in outboxes.iter().flat_map(|o| &o.characters) {
+        for (from, code) in &c.codes {
+            // Only from someone who is a Sterling partner of this character right now.
+            let Some(partner) = c.partners.iter().find(|p| &p.guid == from && !p.removed) else { continue };
+            if active_pair(pairings, &c.guid, from).is_some() {
+                continue;
+            }
+            let key = tried_key(&c.guid, from, code);
+            if st.tried.contains(&key) {
+                continue;
+            }
+            let label = partner.name.clone().unwrap_or_else(|| "a Sterling partner".into());
+            let peek = match api.peek_code(&c.guid, code) {
+                Ok(p) => p,
+                Err(e) if try_later(&e) => return made,
+                Err(_) => {
+                    // not_found, own_code and the like: the code is spent or wrong; never retry it.
+                    st.tried.insert(key);
+                    continue;
+                }
+            };
+            // The code must belong to the very character Sterling says sent it.
+            if &peek.partner.guid != from {
+                st.tried.insert(key);
+                rep.skipped.push("pairing code that didn't match its sender".into());
+                continue;
+            }
+            if peek.different_install {
+                st.tried.insert(key);
+                rep.auto_notes.push(format!(
+                    "{} is already synced from another install. Pair by hand in Partners if you want to switch.",
+                    peek.partner.name
+                ));
+                continue;
+            }
+            match api.redeem_code(&c.guid, code, false) {
+                Ok(_) => {
+                    st.tried.insert(key);
+                    rep.auto_paired.push((c.guid.clone(), from.clone(), peek.partner.name.clone()));
+                    made = true;
+                }
+                Err(e) if try_later(&e) => return made,
+                Err(Error::Api { code: why, .. }) => {
+                    st.tried.insert(key);
+                    if why == "partner_limit" {
+                        rep.auto_notes.push(format!("Couldn't pair with {label}: one of you already has the most partners allowed."));
+                    }
+                }
+                Err(_) => {
+                    st.tried.insert(key);
+                }
+            }
+        }
+    }
+    // Keep the list from growing forever: only codes still in some outbox matter.
+    let live: BTreeSet<String> = outboxes
+        .iter()
+        .flat_map(|o| &o.characters)
+        .flat_map(|c| c.codes.iter().map(move |(f, k)| tried_key(&c.guid, f, k)))
+        .collect();
+    st.tried.retain(|k| live.contains(k));
+    made
+}
+
+/// Keeps one fresh code per unpaired Sterling partner in the inbox, and cancels codes no longer needed.
+fn offer_codes(api: &dyn Api, st: &mut State, rep: &mut Report, outboxes: &[Outbox], pairings: &[Pairing], now: i64) {
+    // Who should get a code: Sterling partners of characters on this PC with no live pairing.
+    let mut want: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for c in outboxes.iter().flat_map(|o| &o.characters) {
+        let list = want.entry(c.guid.clone()).or_default();
+        for p in c.partners.iter().filter(|p| !p.removed && valid_guid(&p.guid) && p.guid != c.guid) {
+            if active_pair(pairings, &c.guid, &p.guid).is_none() && !list.contains(&p.guid) {
+                list.push(p.guid.clone());
+            }
+        }
+        list.truncate(MAX_OFFERS);
+    }
+
+    // Cancel what isn't wanted any more (paired, removed, or the character left this PC).
+    let mut stop: Vec<Offer> = Vec::new();
+    for (me, offers) in st.offers.iter_mut() {
+        let w = want.get(me);
+        offers.retain(|partner, o| {
+            let keep = w.is_some_and(|l| l.contains(partner));
+            if !keep {
+                stop.push(o.clone());
+            }
+            keep
+        });
+    }
+    st.offers.retain(|_, o| !o.is_empty());
+    for o in stop {
+        // Already used or expired is fine; anything else the server clears within a day.
+        let _ = api.cancel_code(&o.id);
+    }
+
+    // Make or refresh codes.
+    let mut busy = false;
+    for (me, partners) in &want {
+        for partner in partners {
+            if busy {
+                break;
+            }
+            let cur = st.offers.get(me).and_then(|m| m.get(partner)).cloned();
+            if cur.as_ref().is_some_and(|o| o.expires - now > OFFER_REFRESH) {
+                continue;
+            }
+            match api.pair_code(me) {
+                Ok(code) => {
+                    let id = code.id.clone().unwrap_or_default();
+                    if !RE_PAIR_CODE.is_match(&code.code) || id.is_empty() || code.expires_at <= now {
+                        rep.skipped.push("pairing code from the server that failed checks".into());
+                        if !id.is_empty() {
+                            let _ = api.cancel_code(&id);
+                        }
+                        busy = true;
+                        continue;
+                    }
+                    if let Some(old) = cur {
+                        let _ = api.cancel_code(&old.id);
+                    }
+                    st.offers.entry(me.clone()).or_default().insert(partner.clone(), Offer { id, code: code.code, expires: code.expires_at });
+                    rep.auto_offered += 1;
+                }
+                Err(Error::Api { code, .. }) if code == "partner_limit" => {
+                    // No room for another open code on this character; the rest wait.
+                    break;
+                }
+                Err(_) => busy = true,
+            }
+        }
+    }
+
+    // Put the offers in the inbox for every character on this PC.
+    let mut chars: BTreeSet<String> = want.keys().cloned().collect();
+    chars.extend(st.inbox.chars.iter().filter(|(_, c)| !c.offers.is_empty()).map(|(g, _)| g.clone()));
+    for me in chars {
+        let offers: Vec<InOffer> = st
+            .offers
+            .get(&me)
+            .map(|m| {
+                m.iter()
+                    .filter(|(_, o)| o.expires > now)
+                    .map(|(p, o)| InOffer { partner: p.clone(), code: o.code.clone(), expires: o.expires })
+                    .collect()
+            })
+            .unwrap_or_default();
+        st.inbox.set_offers(&me, offers);
+    }
+}
+
 /// One full pass. `now` is the wall clock, used only for `written` and `last_sync`.
 /// `app` carries the versions the add-on shows; None leaves what the inbox has.
 pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox], app: Option<AppInfo>, now: i64) -> Result<Report> {
@@ -217,6 +404,12 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
         }
     }
     if ended_any {
+        pairings = api.pairings()?;
+    }
+
+    // 2b. Auto-pairing: redeem codes Sterling got from partners in game. Runs before uploads so a
+    // new pairing gets its copy right away. Never fails the sync; network trouble just waits.
+    if redeem_codes(api, &mut st, &mut rep, outboxes, &pairings) {
         pairings = api.pairings()?;
     }
 
@@ -268,6 +461,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
 
     // 4. Downloads, page by page.
     let before = st.inbox.clone();
+    offer_codes(api, &mut st, &mut rep, outboxes, &pairings, now);
     if let Some(a) = app {
         st.inbox.app = Some(a);
     }
@@ -320,7 +514,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
             c.packets.retain(|p| p.kind == Kind::SelfCopy || live.contains(p.from.as_str()));
         }
     }
-    st.inbox.chars.retain(|g, c| !c.packets.is_empty() || !c.pairs.is_empty() || mine.contains(g));
+    st.inbox.chars.retain(|g, c| !c.packets.is_empty() || !c.pairs.is_empty() || !c.offers.is_empty() || mine.contains(g));
     st.pairs = pairings.iter().map(PairView::from).collect();
 
     // 6. Write the inbox (backup first), then commit the state.
@@ -339,7 +533,7 @@ pub fn sync(api: &dyn Api, fs_: &SafeFs, state: &mut State, outboxes: &[Outbox],
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{InboxPage, ServerPacket};
+    use crate::api::{Code, InboxPage, Peek, Redeemed, ServerPacket};
     use crate::formats::{parse_outbox, CharacterOut, PartnerOut};
     use std::cell::RefCell;
 
@@ -356,6 +550,12 @@ mod tests {
         chars: RefCell<usize>,
         ended: RefCell<Vec<String>>,
         seq: RefCell<i64>,
+        /// Open codes: id -> (code, owner character GUID, owner name).
+        codes: RefCell<BTreeMap<String, (String, String, String)>>,
+        cancelled: RefCell<Vec<String>>,
+        redeemed: RefCell<Vec<String>>,
+        next_code: RefCell<u32>,
+        offline: RefCell<bool>,
     }
 
     impl Api for Fake {
@@ -397,6 +597,48 @@ mod tests {
             let next = packets.last().map(|p| p.seq).unwrap_or(since);
             Ok(InboxPage { packets, next, more })
         }
+        fn pair_code(&self, guid: &str) -> Result<Code> {
+            if *self.offline.borrow() {
+                return Err(Error::Offline);
+            }
+            *self.next_code.borrow_mut() += 1;
+            let n = *self.next_code.borrow();
+            let code = format!("AAAA-BBBB-{:0>4}", n).replace('0', "C").replace('1', "D");
+            let id = format!("c{n}");
+            self.codes.borrow_mut().insert(id.clone(), (code.clone(), guid.into(), "Kaelith Emberfall".into()));
+            Ok(Code { code, expires_at: 1_794_770_000 + 86_400, id: Some(id), guid: Some(guid.into()) })
+        }
+        fn cancel_code(&self, id: &str) -> Result<()> {
+            self.cancelled.borrow_mut().push(id.into());
+            self.codes.borrow_mut().remove(id);
+            Ok(())
+        }
+        fn peek_code(&self, _guid: &str, code: &str) -> Result<Peek> {
+            if *self.offline.borrow() {
+                return Err(Error::Offline);
+            }
+            let codes = self.codes.borrow();
+            let Some((_, owner, name)) = codes.values().find(|(c, _, _)| c == code) else {
+                return Err(Error::Api { status: 404, code: "not_found".into(), body: String::new() });
+            };
+            Ok(Peek {
+                partner: Character { guid: owner.clone(), name: name.clone(), realm: "R".into() },
+                already_paired: false,
+                different_install: false,
+            })
+        }
+        fn redeem_code(&self, guid: &str, code: &str, _replace: bool) -> Result<Redeemed> {
+            let found = self.codes.borrow().iter().find(|(_, (c, _, _))| c == code).map(|(id, (_, o, _))| (id.clone(), o.clone()));
+            let Some((id, owner)) = found else {
+                return Err(Error::Api { status: 404, code: "not_found".into(), body: String::new() });
+            };
+            self.codes.borrow_mut().remove(&id);
+            self.redeemed.borrow_mut().push(code.into());
+            let mut p = pairing("auto", guid, &owner, 1_794_770_050);
+            p.partner_name = "Bran".into();
+            self.pairings.borrow_mut().push(p);
+            Ok(Redeemed { pairing_id: "auto".into(), already_paired: false, replaced: 0 })
+        }
     }
 
     fn pairing(id: &str, me: &str, partner: &str, created: i64) -> Pairing {
@@ -416,11 +658,11 @@ mod tests {
     }
 
     fn outbox(saved: i64, packet: &str, removed: Option<i64>) -> Outbox {
-        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false }];
+        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false, name: None }];
         if let Some(ch) = removed {
-            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true };
+            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true, name: None };
         }
-        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false });
+        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false, name: None });
         Outbox {
             characters: vec![CharacterOut {
                 guid: ME.into(),
@@ -431,6 +673,7 @@ mod tests {
                 self_packet: Some("SELF1".into()),
                 partners,
                 applied: Default::default(),
+                codes: Default::default(),
             }],
             skipped: vec![],
         }
@@ -545,5 +788,102 @@ mod tests {
         let r = sync(&api, &fs_, &mut st, &[o], None, 1).unwrap();
         assert_eq!(r.uploaded, 1);
         assert_eq!(api.slots.borrow()[&slot_key(ME, BRAN)].1, "ABC");
+    }
+
+    #[test]
+    fn offers_a_code_to_each_unpaired_partner_and_keeps_it() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
+        let mut st = load_state(&fs_);
+        let now = 1_794_770_100;
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, now).unwrap();
+        assert_eq!(r.auto_offered, 1, "only ALT is unpaired");
+        let offers = &st.inbox.chars[ME].offers;
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0].partner, ALT);
+        assert!(RE_PAIR_CODE.is_match(&offers[0].code));
+        let lua = fs::read_to_string(fs_.root(Root::Companion).join("Inbox.lua")).unwrap();
+        assert!(lua.contains("offers = {") && lua.contains(&offers[0].code));
+        // Next pass keeps the same code.
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, now + 60).unwrap();
+        assert_eq!(r.auto_offered, 0);
+        // Near expiry it's replaced and the old one cancelled.
+        let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_000 + 86_400 - 3600).unwrap();
+        assert_eq!(r.auto_offered, 1);
+        assert_eq!(api.cancelled.borrow().as_slice(), ["c1"]);
+    }
+
+    #[test]
+    fn offer_is_dropped_once_paired() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
+        let mut st = load_state(&fs_);
+        sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_100).unwrap();
+        api.pairings.borrow_mut().push(pairing("p2", ME, ALT, 1_794_770_200));
+        sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_300).unwrap();
+        assert!(st.inbox.chars[ME].offers.is_empty());
+        assert!(st.offers.is_empty());
+        assert_eq!(api.cancelled.borrow().as_slice(), ["c1"]);
+    }
+
+    #[test]
+    fn redeems_a_code_from_the_partner_that_sent_it() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
+        // ALT's app made a code; ALT's Sterling handed it to us in game.
+        let code = api.pair_code(ALT).unwrap().code;
+        let mut o = outbox(1_794_770_000, "C", None);
+        o.characters[0].codes.insert(ALT.into(), code.clone());
+        let mut st = load_state(&fs_);
+        let r = sync(&api, &fs_, &mut st, &[o.clone()], None, 1_794_770_100).unwrap();
+        assert_eq!(r.auto_paired, vec![(ME.to_string(), ALT.to_string(), "Kaelith Emberfall".to_string())]);
+        assert!(r.sent_to.contains(&(ME.to_string(), ALT.to_string())), "copy goes up the same pass");
+        assert!(st.inbox.chars[ME].offers.is_empty(), "no offer needed any more");
+        let r = sync(&api, &fs_, &mut st, &[o], None, 1_794_770_200).unwrap();
+        assert!(r.auto_paired.is_empty());
+        assert_eq!(api.redeemed.borrow().len(), 1);
+    }
+
+    #[test]
+    fn never_redeems_a_code_from_someone_else() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
+        // A code that really belongs to a stranger, passed along as if from ALT.
+        let code = api.pair_code("Player-6800-DEADBEEF").unwrap().code;
+        let mut o = outbox(1_794_770_000, "C", None);
+        o.characters[0].codes.insert(ALT.into(), code);
+        // And one from someone who isn't a Sterling partner at all.
+        let other = api.pair_code("Player-6800-0000FFFF").unwrap().code;
+        o.characters[0].codes.insert("Player-6800-0000FFFF".into(), other);
+        let mut st = load_state(&fs_);
+        let r = sync(&api, &fs_, &mut st, &[o.clone()], None, 1).unwrap();
+        assert!(r.auto_paired.is_empty());
+        assert!(api.redeemed.borrow().is_empty());
+        assert!(r.skipped.iter().any(|s| s.contains("didn't match")));
+        // Tried once only.
+        let r = sync(&api, &fs_, &mut st, &[o], None, 2).unwrap();
+        assert!(!r.skipped.iter().any(|s| s.contains("didn't match")));
+    }
+
+    #[test]
+    fn auto_pairing_trouble_never_fails_the_sync() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        api.pairings.borrow_mut().push(pairing("p1", ME, BRAN, 1_794_000_000));
+        let code = api.pair_code(ALT).unwrap().code;
+        *api.offline.borrow_mut() = true;
+        let mut o = outbox(1_794_770_000, "C", None);
+        o.characters[0].codes.insert(ALT.into(), code);
+        let mut st = load_state(&fs_);
+        let r = sync(&api, &fs_, &mut st, &[o.clone()], None, 1).unwrap();
+        assert_eq!(r.uploaded, 2, "normal sync still ran");
+        assert!(st.tried.is_empty(), "will try again");
+        *api.offline.borrow_mut() = false;
+        let r = sync(&api, &fs_, &mut st, &[o], None, 2).unwrap();
+        assert_eq!(r.auto_paired.len(), 1);
     }
 }

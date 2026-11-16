@@ -47,6 +47,15 @@ impl Pc {
 
     /// Stands in for the game writing the companion's SavedVariables at logout.
     fn game_saves(&self, guid: &str, name: &str, saved: i64, self_copy: &str, partners: &[(&str, Option<&str>, i64)]) {
+        self.game_saves_codes(guid, name, saved, self_copy, partners, &[]);
+    }
+
+    /// Same, plus codes Sterling received from partners in game (auto-pairing).
+    fn game_saves_codes(&self, guid: &str, name: &str, saved: i64, self_copy: &str, partners: &[(&str, Option<&str>, i64)], codes: &[(&str, &str)]) {
+        let mut c = String::new();
+        for (from, code) in codes {
+            c.push_str(&format!("[\"{from}\"] = {{ [\"code\"] = \"{code}\", [\"time\"] = {saved} }},\n"));
+        }
         let mut p = String::new();
         for (g, packet, change) in partners {
             match packet {
@@ -55,7 +64,7 @@ impl Pc {
             }
         }
         let text = format!(
-            "SterlingQuestSyncOut = {{\n[\"format\"] = 1,\n[\"characters\"] = {{\n[\"{guid}\"] = {{\n[\"name\"] = \"{name}\",\n[\"realm\"] = \"{REALM}\",\n[\"saved\"] = {saved},\n[\"proto\"] = 6,\n[\"self\"] = \"{self_copy}\",\n[\"partners\"] = {{\n{p}}},\n}},\n}},\n}}\n"
+            "SterlingQuestSyncOut = {{\n[\"format\"] = 1,\n[\"characters\"] = {{\n[\"{guid}\"] = {{\n[\"name\"] = \"{name}\",\n[\"realm\"] = \"{REALM}\",\n[\"saved\"] = {saved},\n[\"proto\"] = 6,\n[\"self\"] = \"{self_copy}\",\n[\"partners\"] = {{\n{p}}},\n[\"codes\"] = {{\n{c}}},\n}},\n}},\n}}\n"
         );
         fs::write(paths::outbox_file(self.fs.game(), &self.acct), text).unwrap();
     }
@@ -191,4 +200,52 @@ fn three_pcs_full_flow() {
         other => panic!("expected unknown_key, got {other:?}"),
     }
     eprintln!("e2e ok");
+}
+
+#[test]
+fn sterling_partners_pair_on_their_own() {
+    let Ok(server) = std::env::var("SQS_E2E_SERVER") else {
+        eprintln!("SQS_E2E_SERVER not set, skipping");
+        return;
+    };
+    let t0 = now();
+    let mut kael = Pc::new(&server, "TESTACCOUNT");
+    let mut bran = Pc::new(&server, "PARTNERACCT");
+    kael.api.join("Kael PC", None).unwrap();
+    bran.api.join("Bran PC", None).unwrap();
+
+    // Already Sterling partners in game, never paired in the app.
+    kael.game_saves(KAEL, "Kaelith Emberfall", t0, "RS1", &[(BRAN, Some("R2S1"), 1)]);
+    bran.game_saves(BRAN, "Brannoc Ashvale", t0, "SS1", &[(KAEL, Some("S2R1"), 1)]);
+    let r = kael.sync();
+    assert_eq!(r.auto_offered, 1, "{r:?}");
+    assert_eq!(r.not_paired.len(), 1);
+    let offer = kael.state.inbox.chars[KAEL].offers[0].clone();
+    assert_eq!(offer.partner, BRAN);
+    assert!(kael.inbox_lua().contains(&offer.code));
+    bran.sync();
+
+    // Kael's Sterling hands the code to Bran in game; her Sterling saves it at logout.
+    bran.game_saves_codes(BRAN, "Brannoc Ashvale", t0 + 60, "SS2", &[(KAEL, Some("S2R2"), 1)], &[(KAEL, &offer.code)]);
+    let r = bran.sync();
+    assert_eq!(r.auto_paired.len(), 1, "{r:?}");
+    assert_eq!(r.auto_paired[0].2, "Kaelith Emberfall");
+    assert!(r.sent_to.contains(&(BRAN.to_string(), KAEL.to_string())), "her copy goes up right away");
+    assert!(bran.state.inbox.chars[BRAN].offers.is_empty(), "her own offer is cancelled");
+    assert!(bran.state.inbox.chars[BRAN].pairs.iter().any(|p| p.partner == KAEL && p.status == PairStatus::Active));
+
+    // Kael's next sync sees the pairing, drops his offer and gets her copy.
+    let r = kael.sync();
+    assert!(kael.state.inbox.chars[KAEL].offers.is_empty(), "{r:?}");
+    assert!(kael.state.inbox.chars[KAEL].packets.iter().any(|p| p.data == "S2R2"));
+    assert!(kael.api.open_codes().unwrap().is_empty(), "no codes left open");
+    assert!(bran.api.open_codes().unwrap().is_empty());
+
+    // The same code again does nothing.
+    let r = bran.sync();
+    assert!(r.auto_paired.is_empty());
+
+    kael.api.delete_account().unwrap();
+    bran.api.delete_account().unwrap();
+    eprintln!("auto-pairing e2e ok");
 }
