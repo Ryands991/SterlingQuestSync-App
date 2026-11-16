@@ -373,7 +373,7 @@ function partnerRows(c) {
   for (const p of list.filter((p) => p.active)) {
     rows.push({ guid: p.guid, opts: {
       name: p.name, look: p.look, star: star(p.guid),
-      status: p.last_copy ? (p.applied ? "Up to date" : "New copy, /reload to see it") : "Paired. Waiting for their next save",
+      status: p.last_copy ? (p.applied ? "Up to date" : S.game_running ? "New copy, /reload to see it" : "New copy, log in to see it") : "Paired. Waiting for their next save",
       statusCls: p.last_copy ? (p.applied ? "s-ok" : "s-wait") : "",
       right: [null, lastTime(p.last_copy, p.look && p.look.seen)],
       menu: async () => {
@@ -417,6 +417,7 @@ function partnerRows(c) {
 }
 
 function renderPartners(c) {
+  $("p-note").textContent = (S.game_running ? "Changes here reach the game when you /reload." : "Changes here reach the game next time you log in.") + " Changes made in game show up here after the game saves. If both happen in one session, removing wins.";
   $("p-sub").replaceChildren();
   const you = $("p-you"); you.replaceChildren();
   const body = $("p-rows"); body.replaceChildren();

@@ -68,6 +68,17 @@ struct Settings {
     /// WoW only finds new add-on folders at startup, so the game needs a full restart.
     /// Cleared once the game is seen closed.
     restart_game: bool,
+    /// Where the window was last, so it opens there again.
+    window: Option<Placement>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+struct Placement {
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    max: bool,
 }
 
 impl Default for Settings {
@@ -83,6 +94,7 @@ impl Default for Settings {
             close_to_tray: true,
             character: None,
             restart_game: false,
+            window: None,
         }
     }
 }
@@ -628,7 +640,8 @@ fn describe(inner: &mut Inner, r: &Report) {
         inner.log(format!("Skipped {} item(s) that didn't pass checks", r.skipped.len()), "bad");
     }
     if r.inbox_written && (!r.received_from.is_empty() || !r.ended.is_empty() || r.auto_offered > 0) {
-        inner.log("Updated the inbox. /reload or log in to see it in game.", "");
+        let how = if inner.game_running { "Type /reload in game to see it." } else { "You'll see it next time you log in." };
+        inner.log(format!("Updated the inbox. {how}"), "");
     }
 }
 
@@ -1152,6 +1165,60 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+static PLACE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Notes the window's spot after a move or resize, and saves it once things settle
+/// (a drag sends many events). Minimized or hidden windows report odd spots, so those are skipped.
+fn remember_placement(w: &tauri::Window) {
+    if w.is_minimized().unwrap_or(false) || !w.is_visible().unwrap_or(false) {
+        return;
+    }
+    let app = w.app_handle().clone();
+    {
+        let st = app.state::<AppState>();
+        let mut inner = st.inner.lock().unwrap();
+        let mut p = inner.settings.window.unwrap_or_default();
+        p.max = w.is_maximized().unwrap_or(false);
+        if !p.max {
+            if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) {
+                p = Placement { x: pos.x, y: pos.y, w: size.width, h: size.height, max: false };
+            }
+        }
+        inner.settings.window = Some(p);
+    }
+    use std::sync::atomic::Ordering;
+    let mine = PLACE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(800));
+        if PLACE_GEN.load(Ordering::SeqCst) == mine {
+            let st = app.state::<AppState>();
+            let inner = st.inner.lock().unwrap();
+            let _ = save_json("settings.json", &inner.settings);
+        }
+    });
+}
+
+/// Puts the window back where it was, if that spot is still on a connected screen.
+fn restore_placement(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("main") else { return };
+    let saved = app.state::<AppState>().inner.lock().unwrap().settings.window;
+    if let Some(p) = saved.filter(|p| p.w > 0 && p.h > 0) {
+        // The title bar's middle has to land on a screen, or the window could be unreachable.
+        let (cx, cy) = (p.x + p.w as i32 / 2, p.y + 20);
+        let on_screen = w.available_monitors().unwrap_or_default().iter().any(|m| {
+            let (mp, ms) = (m.position(), m.size());
+            cx >= mp.x && cx < mp.x + ms.width as i32 && cy >= mp.y && cy < mp.y + ms.height as i32
+        });
+        if on_screen {
+            let _ = w.set_size(tauri::PhysicalSize::new(p.w, p.h));
+            let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.y));
+        }
+        if p.max {
+            let _ = w.maximize();
+        }
+    }
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -1238,6 +1305,9 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                remember_placement(window);
+            }
             // Alt+F4 and other ways of closing follow the same setting as the X button.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let to_tray = window.app_handle().state::<AppState>().inner.lock().unwrap().settings.close_to_tray;
@@ -1248,6 +1318,12 @@ fn main() {
             }
         })
         .setup(|app| {
+            // The window starts hidden so it can be put back in its old spot before anyone sees it.
+            restore_placement(app.handle());
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
             let open = MenuItem::with_id(app, "open", "Open Sterling Quest Sync", true, None::<&str>)?;
             let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
