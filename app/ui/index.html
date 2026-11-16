@@ -206,7 +206,8 @@
       <label class="toggle"><span>Sync automatically after each save</span><input type="checkbox" id="s-auto"></label>
       <label class="toggle"><span>Close button keeps it running in the tray<span class="small muted block">Off: the X quits the app. Quit any time from the tray icon.</span></span><input type="checkbox" id="s-tray"></label>
       <label class="toggle"><span>Update this app automatically<span class="small muted block">Off: ask me when a new version is out</span></span><input type="checkbox" id="s-app-auto"></label>
-      <div class="kv"><span>App version <b id="s-ver"></b><span class="small muted block" id="s-ver-note">Checks on its own every few hours.</span></span><button type="button" class="btn small" id="s-check">Check for updates</button></div>
+      <div class="kv"><span>App version <b id="s-appver"></b><span class="small muted block" id="s-ver-note">Checks on its own every few hours.</span></span><span class="btns"><button type="button" class="btn small" id="s-check">Check for updates</button><button type="button" class="btn small" id="s-update" hidden>Update</button></span></div>
+      <div class="upd" id="s-progress" hidden><span class="upd-step" id="s-step"></span><div class="bar"><div class="fill" id="s-fill"></div></div></div>
       <label class="toggle"><span>Keep Sterling up to date<span class="small muted block" id="s-sterling"></span></span><input type="checkbox" id="s-sterling-auto"></label>
     </section>
     <section class="card">

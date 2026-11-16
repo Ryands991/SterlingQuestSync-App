@@ -258,15 +258,11 @@ function renderHome(c) {
   const ac = $("app-card");
   const av = S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
   const up = S.updating;
-  $("app-progress").hidden = !up;
+  progress("app", up);
   if (up) {
     ac.hidden = false;
     $("app-text").replaceChildren(el("b", "", "Updating Sterling Quest Sync"), el("span", "muted", av ? " to " : ""), el("b", "good-t", av || ""));
     $("app-update").hidden = true;
-    $("app-step").textContent = up.percent != null ? up.step + ": " + up.percent + "%" : up.step;
-    const bar = $("app-fill").parentElement;
-    bar.classList.toggle("wait", up.percent == null);
-    $("app-fill").style.width = up.percent != null ? up.percent + "%" : "";
   } else if (av) {
     ac.hidden = false;
     $("app-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
@@ -520,7 +516,8 @@ function renderSettings() {
   $("s-auto").checked = S.auto_sync;
   $("s-sterling-auto").checked = S.auto_update_sterling;
   $("s-app-auto").checked = S.auto_update_app;
-  $("s-ver").textContent = S.version;
+  $("s-appver").textContent = S.version;
+  renderAppUpdateSettings();
   $("s-tray").checked = S.close_to_tray;
   $("s-sterling").textContent = S.sterling_version ? "Installed " + S.sterling_version + ". Your old copy is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
@@ -579,18 +576,48 @@ $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-tray").onchange = (e) => call("set_options", { closeToTray: e.target.checked }).catch(fail);
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
+// Shared update progress: a step line and a bar (filled by percent, or a moving sliver when there's no number).
+function progress(prefix, up) {
+  $(prefix + "-progress").hidden = !up;
+  if (!up) return;
+  $(prefix + "-step").textContent = up.percent != null ? up.step + ": " + up.percent + "%" : up.step;
+  const fill = $(prefix + "-fill");
+  fill.parentElement.classList.toggle("wait", up.percent == null);
+  fill.style.width = up.percent != null ? up.percent + "%" : "";
+}
+
+let lastCheck = null; // { found, at } from the Settings button
+function renderAppUpdateSettings() {
+  const up = S.updating, ready = S.app_update;
+  progress("s", up);
+  $("s-check").hidden = !!up;
+  $("s-update").hidden = !!up || !ready;
+  if (ready) $("s-update").textContent = "Update to " + ready;
+  const note = $("s-ver-note");
+  note.className = "small muted block";
+  if (up) note.textContent = "Updating" + (ready ? " to " + ready : "") + ". The app reopens when it's done.";
+  else if (ready) { note.textContent = "Version " + ready + " is ready to install."; note.className = "small good-t block"; }
+  else if (lastCheck && lastCheck.err) { note.textContent = "Couldn't check just now. Try again in a bit."; note.className = "small bad-t block"; }
+  else if (lastCheck) note.textContent = "You have the newest version. Checked " + ago(lastCheck.at) + ".";
+  else note.textContent = "Checks on its own every few hours.";
+}
+
 $("s-check").onclick = () => busy($("s-check"), async () => {
   $("s-check").textContent = "Checking...";
+  $("s-ver-note").textContent = "Checking for updates...";
   try {
     const v = await call("check_for_app_update");
-    $("s-ver-note").textContent = v ? "Version " + v + " is ready. Update it from Home." : "You have the newest version.";
-    toast(v ? "Version " + v + " is ready. Update it from Home." : "You have the newest version.");
-  } finally { $("s-check").textContent = "Check for updates"; }
+    lastCheck = { found: v, at: Math.floor(Date.now() / 1000) };
+  } catch (e) { lastCheck = { err: true, at: Math.floor(Date.now() / 1000) }; throw e; }
+  finally { $("s-check").textContent = "Check for updates"; if (S) renderAppUpdateSettings(); }
 });
-$("app-update").onclick = async () => {
+
+async function askUpdate(btn) {
   const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + S.app_update + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
-  if (ok) busy($("app-update"), () => call("update_app"));
-};
+  if (ok) busy(btn, () => call("update_app"));
+}
+$("app-update").onclick = () => askUpdate($("app-update"));
+$("s-update").onclick = () => askUpdate($("s-update"));
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);
 $("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? (S.restart_game ? ". Exit WoW completely and start it again to load it." : ". Type /reload in game to load it.") : "")); });

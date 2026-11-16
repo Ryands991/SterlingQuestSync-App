@@ -187,6 +187,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 
 .toggle { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--line2); cursor: pointer; }
 .toggle:last-child { border-bottom: 0; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .kv { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; }
 .path { font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
 .danger { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-color: var(--bad-line); }
