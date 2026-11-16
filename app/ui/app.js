@@ -307,12 +307,11 @@ function eventRow(a) {
 const CLASS_NAMES = { WARRIOR: "Warrior", PALADIN: "Paladin", HUNTER: "Hunter", ROGUE: "Rogue", PRIEST: "Priest", SHAMAN: "Shaman", MAGE: "Mage", WARLOCK: "Warlock", DRUID: "Druid", DEATHKNIGHT: "Death Knight", MONK: "Monk", DEMONHUNTER: "Demon Hunter", EVOKER: "Evoker" };
 const classCls = (look) => (look && CLASS_NAMES[look.class] ? " c-" + look.class : "");
 
-// One row in Sterling's in-game style: frame, name, status line, right side, menu.
+// One row in Sterling's in-game style: name, status line, right side, menu.
 function prow(o) {
   const row = el("div", "prow" + (o.you ? " you" : ""));
   if (o.you) row.append(el("span", "ptag", "YOU"));
   const dim = !!o.dim;
-  row.append(el("div", "pf" + (dim ? " dim" : classCls(o.look)), (o.name || "?").charAt(0).toUpperCase()));
   const m = el("div", "pm");
   m.append(el("div", "pn" + (dim ? " dim" : classCls(o.look)), o.name || "Sterling partner"));
   const line = el("div", "pl");
