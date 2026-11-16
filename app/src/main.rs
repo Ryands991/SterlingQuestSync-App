@@ -137,8 +137,17 @@ struct Inner {
     app_update: Option<String>,
     sterling_checked: Option<Instant>,
     busy: bool,
+    /// What an app update in progress is doing, for the Home card.
+    updating: Option<UpdateStep>,
     /// Folder shown in setup step 1, not used until Continue.
     candidate: Option<PathBuf>,
+}
+
+#[derive(Serialize, Clone)]
+struct UpdateStep {
+    step: String,
+    /// 0 to 100 while downloading, absent when there's no number to show.
+    percent: Option<u8>,
 }
 
 struct AppState {
@@ -282,6 +291,7 @@ struct Status {
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
+    updating: Option<UpdateStep>,
     character: Option<String>,
     characters: Vec<CharStatus>,
     activity: Vec<Activity>,
@@ -397,6 +407,7 @@ fn build_status(st: &AppState) -> Status {
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
+        updating: inner.updating.clone(),
         character: s.character.clone(),
         characters,
         activity: inner.activity.iter().take(60).cloned().collect(),
@@ -898,22 +909,84 @@ fn check_app_update(app: &AppHandle) -> Option<String> {
 /// Downloads the update, checks its signature against the key built into this app, and runs it.
 /// The installer closes the app and starts the new version.
 fn install_app_update(app: &AppHandle) -> Result<(), String> {
-    let st = app.state::<AppState>();
-    st.inner.lock().unwrap().log("Updating Sterling Quest Sync...", "");
+    let set = |step: &str, percent: Option<u8>| {
+        app.state::<AppState>().inner.lock().unwrap().updating = Some(UpdateStep { step: step.into(), percent });
+        emit_status(app);
+    };
+    {
+        let st = app.state::<AppState>();
+        let mut inner = st.inner.lock().unwrap();
+        if inner.updating.is_some() {
+            return Err("Already updating.".into());
+        }
+        inner.updating = Some(UpdateStep { step: "Getting ready".into(), percent: None });
+        inner.log("Updating Sterling Quest Sync...", "");
+    }
     emit_status(app);
-    tauri::async_runtime::block_on(async {
+    let result = tauri::async_runtime::block_on(async {
         let u = app.updater().map_err(|e| e.to_string())?;
-        let up = u.check().await.map_err(|e| e.to_string())?.ok_or("Already up to date.")?;
-        up.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+        set("Finding the update", None);
+        let up = u.check().await.map_err(|e| e.to_string())?.ok_or("You already have the newest version.")?;
+        let mut got: u64 = 0;
+        let mut shown: Option<u8> = None;
+        set("Downloading", Some(0));
+        up.download_and_install(
+            |chunk, total| {
+                got += chunk as u64;
+                if let Some(t) = total.filter(|t| *t > 0) {
+                    let pct = ((got * 100) / t).min(100) as u8;
+                    if shown != Some(pct) {
+                        shown = Some(pct);
+                        set("Downloading", Some(pct));
+                    }
+                }
+            },
+            || set("Checking the signature and installing. The app reopens in a moment.", None),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         Ok::<(), String>(())
-    })?;
+    });
+    if let Err(e) = result {
+        app.state::<AppState>().inner.lock().unwrap().updating = None;
+        emit_status(app);
+        return Err(e);
+    }
     app.restart();
+}
+
+/// The Settings button: asks the update feed right now and says what it found.
+#[tauri::command(async)]
+fn check_for_app_update(app: AppHandle) -> Result<Option<String>, String> {
+    let a = app.clone();
+    let found = off_runtime(move || {
+        tauri::async_runtime::block_on(async {
+            let u = a.updater().map_err(|e| e.to_string())?;
+            u.check().await.map(|x| x.map(|x| x.version)).map_err(|e| e.to_string())
+        })
+    })
+    .map_err(|e| format!("Couldn't check for updates: {e}"))?;
+    app.state::<AppState>().inner.lock().unwrap().app_update = found.clone();
+    emit_status(&app);
+    Ok(found)
+}
+
+/// Runs blocking update work on its own plain thread. Commands run inside the async runtime,
+/// where `block_on` can't be used (it panicked there, so the Update button did nothing).
+fn off_runtime<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    std::thread::spawn(f).join().unwrap_or_else(|_| Err("The update stopped unexpectedly. Details are in crash.log.".into()))
 }
 
 #[tauri::command(async)]
 fn update_app(app: AppHandle) -> Result<(), String> {
-    install_app_update(&app).map_err(|e| {
-        app.state::<AppState>().inner.lock().unwrap().log(format!("App update failed: {e}"), "bad");
+    let a = app.clone();
+    off_runtime(move || install_app_update(&a)).map_err(|e| {
+        {
+            let st = app.state::<AppState>();
+            let mut inner = st.inner.lock().unwrap();
+            inner.updating = None;
+            inner.log(format!("App update failed: {e}"), "bad");
+        }
         emit_status(&app);
         e
     })
@@ -1152,6 +1225,7 @@ fn main() {
             app_update: None,
             sterling_checked: None,
             busy: false,
+            updating: None,
             candidate: None,
         }),
         keys: Arc::new(SystemStore),
@@ -1231,6 +1305,7 @@ fn main() {
             delete_my_data,
             update_sterling,
             update_app,
+            check_for_app_update,
             open_backups,
             open_page,
             hide_to_tray,

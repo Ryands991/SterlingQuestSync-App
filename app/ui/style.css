@@ -116,6 +116,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .steps { margin: 2px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
 .steps li::marker { color: var(--gold, #c9a227); font-weight: 600; }
 .hero-act { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.upd { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding: 0 8px 10px 0; }
+.upd-step { font-size: 13px; color: var(--muted); }
+.bar { height: 6px; background: var(--bg); border: 1px solid var(--brass); border-radius: 3px; overflow: hidden; }
+.bar .fill { height: 100%; width: 0; background: var(--good); transition: width .3s; }
+.bar.wait .fill { width: 30%; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
 .microcard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 6px 0 14px; background: var(--card); border: 1px solid var(--brass); border-radius: 4px; }
 .li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line2); }
 .li:last-child { border-bottom: 0; }
@@ -211,3 +217,4 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .col-gap16 { display: flex; flex-direction: column; gap: 16px; }
 .unpaired { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; margin-top: 8px; padding: 10px 12px; border: 1px solid var(--brass); border-left: 4px solid var(--gold); border-radius: 4px; background: var(--raised); }
 .warn-t { color: var(--gold); font-weight: 700; }
+.microcard:has(.upd:not([hidden])) { padding-top: 10px; }

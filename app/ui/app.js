@@ -257,7 +257,17 @@ function renderHome(c) {
 
   const ac = $("app-card");
   const av = S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
-  if (av) {
+  const up = S.updating;
+  $("app-progress").hidden = !up;
+  if (up) {
+    ac.hidden = false;
+    $("app-text").replaceChildren(el("b", "", "Updating Sterling Quest Sync"), el("span", "muted", av ? " to " : ""), el("b", "good-t", av || ""));
+    $("app-update").hidden = true;
+    $("app-step").textContent = up.percent != null ? up.step + ": " + up.percent + "%" : up.step;
+    const bar = $("app-fill").parentElement;
+    bar.classList.toggle("wait", up.percent == null);
+    $("app-fill").style.width = up.percent != null ? up.percent + "%" : "";
+  } else if (av) {
     ac.hidden = false;
     $("app-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
     $("app-update").hidden = !S.app_update; // only offer the button once a signed update is ready
@@ -367,7 +377,7 @@ function partnerRows(c) {
   for (const p of list.filter((p) => p.active)) {
     rows.push({ guid: p.guid, opts: {
       name: p.name, look: p.look, star: star(p.guid),
-      status: p.last_copy ? (p.applied ? "Syncing" : "Syncing, /reload to see it") : "Paired, no copy yet",
+      status: p.last_copy ? (p.applied ? "Syncing" : "Syncing, /reload to see it") : "Paired. Waiting for their next save",
       statusCls: p.last_copy ? "s-ok" : "",
       right: [null, lastTime(p.last_copy, p.look && p.look.seen)],
       menu: async () => {
@@ -510,6 +520,7 @@ function renderSettings() {
   $("s-auto").checked = S.auto_sync;
   $("s-sterling-auto").checked = S.auto_update_sterling;
   $("s-app-auto").checked = S.auto_update_app;
+  $("s-ver").textContent = S.version;
   $("s-tray").checked = S.close_to_tray;
   $("s-sterling").textContent = S.sterling_version ? "Installed " + S.sterling_version + ". Your old copy is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
@@ -568,6 +579,14 @@ $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-tray").onchange = (e) => call("set_options", { closeToTray: e.target.checked }).catch(fail);
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
+$("s-check").onclick = () => busy($("s-check"), async () => {
+  $("s-check").textContent = "Checking...";
+  try {
+    const v = await call("check_for_app_update");
+    $("s-ver-note").textContent = v ? "Version " + v + " is ready. Update it from Home." : "You have the newest version.";
+    toast(v ? "Version " + v + " is ready. Update it from Home." : "You have the newest version.");
+  } finally { $("s-check").textContent = "Check for updates"; }
+});
 $("app-update").onclick = async () => {
   const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + S.app_update + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
   if (ok) busy($("app-update"), () => call("update_app"));
