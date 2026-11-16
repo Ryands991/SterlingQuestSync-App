@@ -39,6 +39,10 @@ fn plain_absolute(p: &Path) -> Result<()> {
             Component::ParentDir | Component::CurDir => {
                 return Err(Error::Refused("path contains . or ..".into()))
             }
+            // A colon past the drive letter is a Windows alternate stream ("WTF::$INDEX_ALLOCATION").
+            Component::Normal(n) if n.to_string_lossy().contains(':') => {
+                return Err(Error::Refused("path contains a colon".into()))
+            }
             _ => {}
         }
     }
@@ -414,5 +418,101 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains("sqs-tmp"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn refuses_alternate_streams() {
+        let (_t, s) = setup();
+        let ads = PathBuf::from(format!("{}::$INDEX_ALLOCATION", s.wtf().display())).join("x.lua");
+        assert!(s.check_write(&ads).is_err());
+        let ads2 = PathBuf::from(format!("{}:evil", s.root(Root::Companion).join("Inbox.lua").display()));
+        assert!(s.check_write(&ads2).is_err());
+    }
+
+    // ---- Windows only: real junctions, 8.3 short names, trailing dots. These run on the Windows
+    // build machine on every build (GitHub Actions runs `cargo test` there).
+
+    #[cfg(windows)]
+    fn junction(link: &Path, target: &Path) {
+        let out = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("cmd");
+        assert!(out.status.success(), "mklink /J failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    #[cfg(windows)]
+    fn short_name(p: &Path) -> PathBuf {
+        use std::os::windows::process::CommandExt;
+        // raw_arg: cmd reads its own quoting, not the C runtime's.
+        let out = std::process::Command::new("cmd")
+            .raw_arg(format!("/C for %I in (\"{}\") do @echo %~sI", p.display()))
+            .output()
+            .expect("cmd");
+        PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    }
+
+    #[cfg(windows)]
+    fn sterling_lua(s: &SafeFs) -> String {
+        fs::read_to_string(s.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua")).unwrap()
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_junctions_into_wtf_are_refused() {
+        let (_t, s) = setup();
+        // A junction inside our own folder that points into WTF.
+        let j = s.root(Root::Companion).join("sneaky");
+        junction(&j, s.wtf());
+        assert!(s.write_atomic(&j.join("Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
+        assert!(s.write_atomic(&j.join("New.lua"), b"bad").is_err());
+        assert!(s.create_dir_all(&j.join("Made")).is_err());
+        // One in the app's data folder too.
+        let j2 = s.root(Root::AppData).join("sneaky2");
+        junction(&j2, &s.wtf().join("Account"));
+        assert!(s.write_atomic(&j2.join("x.lua"), b"bad").is_err());
+        assert!(s.remove_scratch(&j2).is_err(), "never follows a junction to delete");
+        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
+        assert!(!s.wtf().join("New.lua").exists() && !s.wtf().join("Made").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_companion_folder_swapped_for_a_junction_is_refused() {
+        let (_t, s) = setup();
+        // Someone replaces the whole SterlingQuestSync folder with a junction to SavedVariables.
+        fs::remove_dir_all(s.root(Root::Companion)).unwrap();
+        junction(s.root(Root::Companion), &s.wtf().join("Account/TESTACCOUNT/SavedVariables"));
+        assert!(s.write_atomic(&s.root(Root::Companion).join("Inbox.lua"), b"bad").is_err());
+        assert!(s.write_atomic(&s.root(Root::Companion).join("Sterling.lua"), b"bad").is_err());
+        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
+        assert!(!s.wtf().join("Account/TESTACCOUNT/SavedVariables/Inbox.lua").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_short_names_and_odd_spellings_still_find_wtf() {
+        let (_t, s) = setup();
+        let sv = s.wtf().join("Account/TESTACCOUNT/SavedVariables");
+        // 8.3 short form of the game folder ("WORLDO~1\_FOREV~1"), when the drive has short names.
+        let short_game = short_name(s.game());
+        eprintln!("game folder short name: {}", short_game.display());
+        assert!(s.check_write(&short_game.join("WTF").join("x.lua")).is_err());
+        assert!(s.write_atomic(&short_game.join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
+        let short_sv = short_name(&sv);
+        assert!(s.write_atomic(&short_sv.join("Sterling.lua"), b"bad").is_err());
+        // Letter case, trailing dots and spaces, forward slashes.
+        for spelled in ["Wtf", "wTF", "WTF.", "WTF ", "WTF. .", "wtf..."] {
+            let p = PathBuf::from(format!("{}\\{}\\Account\\TESTACCOUNT\\SavedVariables\\Sterling.lua", s.game().display(), spelled));
+            assert!(s.write_atomic(&p, b"bad").is_err(), "{spelled}");
+        }
+        let fwd = PathBuf::from(format!("{}/WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua", s.game().display()));
+        assert!(s.write_atomic(&fwd, b"bad").is_err());
+        // The short form of our own folder still works (no false alarms).
+        let short_comp = short_name(s.root(Root::Companion));
+        s.write_atomic(&short_comp.join("Inbox.lua"), b"ok").unwrap();
+        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
     }
 }
