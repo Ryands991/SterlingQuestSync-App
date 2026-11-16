@@ -32,7 +32,7 @@ Works with WoW Forever. Other WoW versions may work but aren't tested.
 1. Download the newest `SterlingQuestSync_<version>_x64-setup.exe` from [Releases](https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest).
 2. Run it. Windows may show "Windows protected your PC" because the app isn't signed by a paid certificate. Click **More info**, then **Run anyway**.
 3. The app finds your WoW folder, offers to install Sterling if it's missing, and makes your account. No email or password.
-4. Log in to the game once with Sterling running, so your character shows up.
+4. Start WoW, or restart it if it was already open, and log in once. Your character then shows up in the app.
 
 The app updates itself after that (it asks first, unless you turn on automatic updates). Updates are signed, and the app checks the signature before installing.
 
@@ -42,6 +42,29 @@ The app updates itself after that (it asks first, unless you turn on automatic u
   <img src="docs/screenshots/setup.png" width="49%" alt="Setup: your game folder, found automatically">
   <img src="docs/screenshots/pair.png" width="49%" alt="Pair a friend: give a code or type one in">
 </p>
+
+## Troubleshooting
+
+**My character doesn't show up in the app**
+
+1. Exit WoW completely and start it again. The app adds a small helper add-on called Sterling Quest Sync, and WoW only finds new add-ons when the game starts. `/reload` won't do it.
+2. At character select, click **AddOns** and make sure **Sterling** and **Sterling Quest Sync** are both ticked. If they say out of date, tick **Load out of date AddOns**.
+3. Log in, then `/reload` or log out. That's when the game saves and the app sees your character.
+4. Still nothing? In the app's Settings, check the game folder is the WoW Forever folder you play from (the one with `Interface` and `WTF` in it).
+
+**A friend still shows "Doesn't have the app yet"**
+
+That news travels in game. Be online at the same time as your friend, then `/reload`. The apps pair on their own after that.
+
+**The app didn't open after installing**
+
+- Open it from the Start menu.
+- Look for the Sterling icon by the clock. Closing the window hides it there instead of quitting.
+- Still won't open? The reason is saved in `%APPDATA%\SterlingQuestSync\crash.log`. Email it to support@sterlingaddons.com or open an issue.
+
+**"Can't reach the server"**
+
+The app keeps trying on its own. If it lasts more than an hour, open an issue.
 
 ## What it can touch on your PC
 

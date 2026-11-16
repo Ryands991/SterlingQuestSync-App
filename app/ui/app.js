@@ -195,11 +195,20 @@ function renderApp() {
   if (page === "settings") renderSettings();
 }
 
+function steps(list, head) {
+  const o = $("h-steps"), h = $("h-steps-head");
+  o.replaceChildren(...(list || []).map(t => el("li", "", t)));
+  o.hidden = !list;
+  h.textContent = head || "";
+  h.hidden = !head;
+}
+
 function renderHome(c) {
   $("auto").checked = S.auto_sync;
   $("sync").disabled = S.busy || !c;
   $("sync").textContent = S.busy ? "Syncing..." : "Sync now";
   const dot = $("h-dot");
+  steps(null);
   // No character chosen: Home shows only what to do next.
   $("home-rest").hidden = !c;
   $("hero-act").hidden = !c;
@@ -218,9 +227,24 @@ function renderHome(c) {
     } else if (!S.sterling_version) {
       $("h-title").textContent = "Sterling isn't installed";
       $("h-line").textContent = "Install Sterling Quest Tracker in this game folder. Your characters show up here once Sterling has something to share.";
+    } else if (S.restart_game && S.game_running) {
+      $("h-title").textContent = "Restart WoW";
+      dot.className = "dot gold";
+      $("h-line").textContent = "One more step: WoW needs a restart to find the new add-on.";
+      steps([
+        "Exit WoW completely. Logging out or /reload won't do it.",
+        "Start WoW and log in to any character.",
+        "That's it. Your character shows up here in a few seconds.",
+      ]);
     } else {
-      $("h-title").textContent = "Waiting for Sterling";
-      $("h-line").textContent = "Nothing to share yet. Your characters show up here once Sterling has a copy ready: play with Sterling enabled, then /reload or log out. Sterling needs a small update to work with this app, coming soon.";
+      $("h-title").textContent = "Almost there";
+      $("h-line").textContent = "Log in to WoW and your characters show up here.";
+      steps([
+        "Exit WoW completely and start it again. New add-ons only load when the game starts.",
+        "At character select, click AddOns and make sure Sterling and Sterling Quest Sync are both ticked.",
+        "Log in, then type /reload. Your character shows up when the game saves.",
+        "Still nothing? In Settings, check the game folder is the WoW Forever folder you play from.",
+      ], "Not showing up?");
     }
   } else {
     $("h-char").textContent = c.name.toUpperCase();
@@ -520,6 +544,7 @@ $("folder-go").onclick = () => busy($("folder-go"), async () => {
   const install = !$("cand-install-row").hidden && $("cand-install").checked;
   if (install) $("folder-go").textContent = "Installing Sterling...";
   try { await call("confirm_game", { installSterling: install }); } finally { $("folder-go").textContent = "Continue"; }
+  if (S.game_running) toast("WoW is open. Exit it completely and start it again so it finds the new add-on.");
   setupStep = "first";
 });
 $("to-recover").onclick = (e) => { e.preventDefault(); setupStep = "recover"; render(S); };
@@ -549,7 +574,7 @@ $("app-update").onclick = async () => {
 };
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);
-$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? ". /reload in game (restart if it's new)." : "")); });
+$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? (S.restart_game ? ". Exit WoW completely and start it again to load it." : ". Type /reload in game to load it.") : "")); });
 
 $("gen").onclick = () => makeCode($("gen"));
 $("gen2").onclick = () => makeCode($("gen2"));

@@ -112,6 +112,9 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .hero { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px; padding: 20px 22px; background: var(--card); border: 1px solid var(--brass); border-radius: 4px; }
 .hero-text { display: flex; flex-direction: column; gap: 6px; }
 .hero-line { display: flex; align-items: center; gap: 8px; }
+.steps-head { margin: 6px 0 0; font-weight: 600; color: var(--gold); }
+.steps { margin: 2px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; line-height: 1.4; }
+.steps li::marker { color: var(--gold, #c9a227); font-weight: 600; }
 .hero-act { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .microcard { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 6px 0 14px; background: var(--card); border: 1px solid var(--brass); border-radius: 4px; }
 .li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line2); }

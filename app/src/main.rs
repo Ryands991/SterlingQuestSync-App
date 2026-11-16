@@ -64,6 +64,10 @@ struct Settings {
     /// The X button hides the window to the tray (keeps syncing) instead of quitting.
     close_to_tray: bool,
     character: Option<String>,
+    /// A new add-on (the companion or Sterling) was added while the game may have been open.
+    /// WoW only finds new add-on folders at startup, so the game needs a full restart.
+    /// Cleared once the game is seen closed.
+    restart_game: bool,
 }
 
 impl Default for Settings {
@@ -78,6 +82,7 @@ impl Default for Settings {
             auto_update_app: false,
             close_to_tray: true,
             character: None,
+            restart_game: false,
         }
     }
 }
@@ -273,6 +278,7 @@ struct Status {
     app_update: Option<String>,
     auto_update_app: bool,
     close_to_tray: bool,
+    restart_game: bool,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -387,6 +393,7 @@ fn build_status(st: &AppState) -> Status {
         app_update: inner.app_update.clone(),
         auto_update_app: s.auto_update_app,
         close_to_tray: s.close_to_tray,
+        restart_game: s.restart_game,
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -417,9 +424,15 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
     let g = paths::normalise_pick(&path).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
     let info = paths::inspect(&g).ok_or("That folder doesn't look like a WoW game folder.")?;
     let sess = open_session(&g)?;
+    let fresh = !companion::is_installed(&sess.fs);
     companion::install(&sess.fs, COMPANION_FILES).map_err(msg)?;
+    let running = GameCheck::default().running(&g);
     {
         let mut inner = st.inner.lock().unwrap();
+        inner.game_running = running;
+        if fresh && running {
+            inner.settings.restart_game = true;
+        }
         inner.settings.game = Some(g);
         save_json("settings.json", &inner.settings)?;
         inner.session = Some(sess);
@@ -853,7 +866,11 @@ fn install_sterling(app: &AppHandle) -> Result<String, String> {
         updater::install(&sess.fs, &bytes, &rel.version).map_err(msg)?;
         inner.sterling_latest = Some(rel.version.clone());
         let running = inner.game_running;
-        let hint = if running && fresh { " Restart the game to load it." } else if running { " Type /reload in game to load it." } else { "" };
+        if running && fresh {
+            inner.settings.restart_game = true;
+            let _ = save_json("settings.json", &inner.settings);
+        }
+        let hint = if running && fresh { " Exit WoW completely and start it again to load it. /reload won't pick up a new add-on." } else if running { " Type /reload in game to load it." } else { "" };
         inner.log(format!("{} Sterling {}.{}", if fresh { "Installed" } else { "Updated to" }, rel.version, hint), "good");
     }
     emit_status(app);
@@ -1010,11 +1027,20 @@ fn background(app: AppHandle) {
                 };
                 if let Some(f) = folder {
                     let running = game.running(&f);
-                    let was = {
+                    let (was, cleared) = {
                         let st = app.state::<AppState>();
                         let mut inner = st.inner.lock().unwrap();
-                        std::mem::replace(&mut inner.game_running, running)
+                        // Game closed: its next start finds any newly added add-on.
+                        let cleared = !running && inner.settings.restart_game;
+                        if cleared {
+                            inner.settings.restart_game = false;
+                            let _ = save_json("settings.json", &inner.settings);
+                        }
+                        (std::mem::replace(&mut inner.game_running, running), cleared)
                     };
+                    if cleared {
+                        emit_status(&app);
+                    }
                     if was != running {
                         // Check the server when the game starts and right after it closes.
                         let _ = maybe_sync(&app);
@@ -1063,7 +1089,46 @@ fn show_main(app: &AppHandle) {
 
 // ------------------------------------------------------------------ main
 
+/// Appends one line to crash.log in the app's own data folder, so a silent failure leaves a reason.
+/// Kept small: the file starts over past 64 KB.
+fn crash_log(text: &str) {
+    use std::io::Write;
+    let dir = app_data();
+    let _ = fs::create_dir_all(&dir);
+    let path = dir.join("crash.log");
+    if fs::metadata(&path).map(|m| m.len() > 64 * 1024).unwrap_or(false) {
+        let _ = fs::remove_file(&path);
+    }
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{} v{VERSION}: {}", now(), text.replace('\n', " "));
+    }
+}
+
+/// The window couldn't open. Says why in a plain Windows message instead of quitting silently.
+fn startup_failed(err: &str) {
+    let mut text = format!("Sterling Quest Sync couldn't open.\n\n{err}\n\n");
+    if err.to_lowercase().contains("webview") {
+        text.push_str("This PC is missing Microsoft Edge WebView2, which the app needs to show its window. Download the free Evergreen installer from https://developer.microsoft.com/microsoft-edge/webview2/, run it, then open Sterling Quest Sync again.\n\n");
+    }
+    text.push_str("The details are saved in %APPDATA%\\SterlingQuestSync\\crash.log. To get help, email that file to support@sterlingaddons.com or open an issue on GitHub.");
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (t, c) = (w(&text), w("Sterling Quest Sync"));
+        unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONERROR) };
+    }
+    #[cfg(not(windows))]
+    eprintln!("{text}");
+    std::process::exit(1);
+}
+
 fn main() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        crash_log(&format!("crashed: {info}"));
+        default_hook(info);
+    }));
     let settings: Settings = fs::read_to_string(app_data().join("settings.json"))
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -1173,7 +1238,10 @@ fn main() {
             quit,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Sterling Quest Sync");
+        .unwrap_or_else(|e| {
+            crash_log(&format!("couldn't start: {e}"));
+            startup_failed(&e.to_string());
+        });
 }
 
 #[cfg(test)]
