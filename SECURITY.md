@@ -4,9 +4,11 @@ Found a way someone could read, change or wipe other people's data, get code int
 
 - **[Report a security problem](https://github.com/SterlingAddons/SterlingQuestSync-App/security/advisories/new)** (GitHub private report, only the owner sees it).
 
+No GitHub account? Email **support@sterlingaddons.com** instead.
+
 Please don't open a public issue for these. Expect a reply within a few days; this is a hobby project.
 
-For someone misusing the app (unwanted syncing, a misused pairing code), use the **Report abuse** issue form instead.
+For someone misusing the app (unwanted syncing, a misused pairing code), use the **Report abuse** issue form, or email support@sterlingaddons.com if you'd rather it stay private.
 
 ## How the app is kept safe
 

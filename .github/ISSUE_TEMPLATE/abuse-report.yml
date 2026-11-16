@@ -13,7 +13,9 @@ body:
         - Don't post your real name, email or anything else personal.
         - Character names and realms are fine. They're what we need to find the account.
 
-        Found a security bug instead? Please use **Report a security problem** on the previous page so it stays private.
+        Rather keep it private, or no GitHub account? Email **support@sterlingaddons.com** instead.
+
+        Found a security bug? Please use **Report a security problem** on the previous page so it stays private.
   - type: dropdown
     id: kind
     attributes:
