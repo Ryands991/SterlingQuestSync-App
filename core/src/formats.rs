@@ -351,6 +351,7 @@ pub fn companion_toc() -> String {
         "## Title: Sterling Quest Sync",
         "## Notes: Data from the Sterling Quest Sync app. Leave enabled.",
         "## Author: SterlingAddons",
+        "## IconTexture: Interface\\AddOns\\SterlingQuestSync\\icon",
         "## Version: 1",
         "## SavedVariables: SterlingQuestSyncOut",
         "",

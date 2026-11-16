@@ -36,6 +36,7 @@ const STERLING_CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const COMPANION_FILES: &[(&str, &[u8])] = &[
     ("SterlingQuestSync.toc", include_bytes!("../companion/SterlingQuestSync.toc")),
     ("Core.lua", include_bytes!("../companion/Core.lua")),
+    ("icon.tga", include_bytes!("../companion/icon.tga")),
 ];
 
 fn now() -> i64 {

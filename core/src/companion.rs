@@ -15,7 +15,7 @@ use crate::paths;
 use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
-static RE_ADDON_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_]{1,40}\.(lua|toc|xml)$").unwrap());
+static RE_ADDON_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_]{1,40}\.(lua|toc|xml|tga)$").unwrap());
 
 /// How many backup sets to keep.
 pub const KEEP_BACKUPS: usize = 30;
