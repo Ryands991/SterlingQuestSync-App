@@ -377,8 +377,8 @@ function partnerRows(c) {
   for (const p of list.filter((p) => p.active)) {
     rows.push({ guid: p.guid, opts: {
       name: p.name, look: p.look, star: star(p.guid),
-      status: p.last_copy ? (p.applied ? "Syncing" : "Syncing, /reload to see it") : "Paired. Waiting for their next save",
-      statusCls: p.last_copy ? "s-ok" : "",
+      status: p.last_copy ? (p.applied ? "Up to date" : "New copy, /reload to see it") : "Paired. Waiting for their next save",
+      statusCls: p.last_copy ? (p.applied ? "s-ok" : "s-wait") : "",
       right: [null, lastTime(p.last_copy, p.look && p.look.seen)],
       menu: async () => {
         const ok = await dialog("Stop syncing with " + ((p.look && p.look.nick) || p.name) + "?", [para("Their copies stop coming in and yours stop going out. You can pair again later with a new code.", "muted")], [["Cancel", false, "ghost"], ["Stop syncing", true, "bad"]]);
