@@ -24,6 +24,11 @@ Sterling began as a little project for me and a few close friends, so we could k
 
 Works with WoW Forever. Other WoW versions may work but aren't tested.
 
+<p align="center">
+  <img src="docs/screenshots/ingame-sync.png" width="380" alt="Sterling's Sync tab in game: partners, who's online, and the app's status">
+</p>
+<p align="center"><sub>In game, Sterling's Sync tab shows each partner, favourites on top, and what the app last did.</sub></p>
+
 ## Get it
 
 1. Download the newest `SterlingQuestSync_<version>_x64-setup.exe` from [Releases](https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest).
