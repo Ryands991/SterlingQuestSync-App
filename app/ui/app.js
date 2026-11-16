@@ -400,6 +400,7 @@ function renderSettings() {
   $("s-auto").checked = S.auto_sync;
   $("s-sterling-auto").checked = S.auto_update_sterling;
   $("s-app-auto").checked = S.auto_update_app;
+  $("s-tray").checked = S.close_to_tray;
   $("s-sterling").textContent = S.sterling_version ? "Installed " + S.sterling_version + ". Your old copy is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
   if (!pcsLoaded) loadPcs();
@@ -409,8 +410,8 @@ function go(p) { page = p; if (p === "settings") pcsLoaded = false; renderApp();
 
 // ---------------------------------------------------------------- wiring
 
-$("win-min").onclick = () => call("hide_to_tray");
-$("win-close").onclick = () => call("quit");
+$("win-min").onclick = () => T.window.getCurrentWindow().minimize().catch(fail);
+$("win-close").onclick = () => call("close_window");
 for (const b of document.querySelectorAll("[data-page]")) b.addEventListener("click", () => go(b.dataset.page));
 for (const b of document.querySelectorAll("[data-copy]")) b.addEventListener("click", () => copy($(b.dataset.copy).textContent));
 for (const a of document.querySelectorAll("[data-open]")) a.addEventListener("click", (e) => { e.preventDefault(); call("open_page", { which: a.dataset.open }); });
@@ -454,6 +455,7 @@ $("rj-recover").onclick = () => { setupStep = "recover"; render(S); };
 $("sync").onclick = () => call("sync_now").catch(fail);
 $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
+$("s-tray").onchange = (e) => call("set_options", { closeToTray: e.target.checked }).catch(fail);
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
 $("app-update").onclick = async () => {
   const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + S.app_update + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);

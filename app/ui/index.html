@@ -12,7 +12,7 @@
 <header class="titlebar" data-tauri-drag-region>
   <div class="brand" data-tauri-drag-region><img class="logo" src="icon.png" alt="" width="20" height="20" data-tauri-drag-region><span class="name" data-tauri-drag-region>Sterling Quest Sync</span><span class="ver" id="ver" data-tauri-drag-region></span></div>
   <div class="winbtns">
-    <button type="button" id="win-min" aria-label="Minimize to tray" title="Minimize to tray"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5"/></svg></button>
+    <button type="button" id="win-min" aria-label="Minimize" title="Minimize"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5"/></svg></button>
     <button type="button" id="win-close" class="close" aria-label="Close" title="Close"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5"/></svg></button>
   </div>
 </header>
@@ -197,6 +197,7 @@
     <section class="card">
       <h2>Syncing and updates</h2>
       <label class="toggle"><span>Sync automatically after each save</span><input type="checkbox" id="s-auto"></label>
+      <label class="toggle"><span>Close button keeps it running in the tray<span class="small muted block">Off: the X quits the app. Quit any time from the tray icon.</span></span><input type="checkbox" id="s-tray"></label>
       <label class="toggle"><span>Update this app automatically<span class="small muted block">Off: ask me when a new version is out</span></span><input type="checkbox" id="s-app-auto"></label>
       <label class="toggle"><span>Keep Sterling up to date<span class="small muted block" id="s-sterling"></span></span><input type="checkbox" id="s-sterling-auto"></label>
     </section>

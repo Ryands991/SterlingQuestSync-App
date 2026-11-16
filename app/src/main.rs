@@ -60,6 +60,8 @@ struct Settings {
     auto_update_sterling: bool,
     /// Off by default: the app asks before updating itself.
     auto_update_app: bool,
+    /// The X button hides the window to the tray (keeps syncing) instead of quitting.
+    close_to_tray: bool,
     character: Option<String>,
 }
 
@@ -73,6 +75,7 @@ impl Default for Settings {
             auto_sync: true,
             auto_update_sterling: true,
             auto_update_app: false,
+            close_to_tray: true,
             character: None,
         }
     }
@@ -242,6 +245,7 @@ struct Status {
     app_latest: Option<String>,
     app_update: Option<String>,
     auto_update_app: bool,
+    close_to_tray: bool,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -329,6 +333,7 @@ fn build_status(st: &AppState) -> Status {
         app_latest: inner.app_latest.clone(),
         app_update: inner.app_update.clone(),
         auto_update_app: s.auto_update_app,
+        close_to_tray: s.close_to_tray,
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -613,6 +618,7 @@ fn set_options(
     auto_sync: Option<bool>,
     auto_update_sterling: Option<bool>,
     auto_update_app: Option<bool>,
+    close_to_tray: Option<bool>,
     character: Option<String>,
 ) -> Result<(), String> {
     {
@@ -622,6 +628,9 @@ fn set_options(
         }
         if let Some(v) = auto_update_sterling {
             inner.settings.auto_update_sterling = v;
+        }
+        if let Some(v) = close_to_tray {
+            inner.settings.close_to_tray = v;
         }
         if let Some(v) = auto_update_app {
             inner.settings.auto_update_app = v;
@@ -860,6 +869,16 @@ fn hide_to_tray(app: AppHandle) {
     }
 }
 
+/// The X button: hide to the tray, or quit, as set in Settings.
+#[tauri::command]
+fn close_window(app: AppHandle, st: State<'_, AppState>) {
+    if st.inner.lock().unwrap().settings.close_to_tray {
+        hide_to_tray(app);
+    } else {
+        app.exit(0);
+    }
+}
+
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
@@ -999,6 +1018,16 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .on_window_event(|window, event| {
+            // Alt+F4 and other ways of closing follow the same setting as the X button.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let to_tray = window.app_handle().state::<AppState>().inner.lock().unwrap().settings.close_to_tray;
+                if to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open Sterling Quest Sync", true, None::<&str>)?;
             let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
@@ -1059,6 +1088,7 @@ fn main() {
             open_backups,
             open_page,
             hide_to_tray,
+            close_window,
             quit,
         ])
         .run(tauri::generate_context!())
