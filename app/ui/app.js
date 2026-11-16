@@ -266,7 +266,7 @@ function renderHome(c) {
   } else if (av) {
     ac.hidden = false;
     $("app-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
-    $("app-update").hidden = !S.app_update; // only offer the button once a signed update is ready
+    $("app-update").hidden = false; // the install finds and checks the signed update itself
   } else ac.hidden = true;
 
   const card = $("sterling-card");
@@ -576,6 +576,11 @@ $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-tray").onchange = (e) => call("set_options", { closeToTray: e.target.checked }).catch(fail);
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
+// A newer app version, from the updater's own check or from the server's note of the latest version.
+function appAvail() {
+  return S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
+}
+
 // Shared update progress: a step line and a bar (filled by percent, or a moving sliver when there's no number).
 function progress(prefix, up) {
   $(prefix + "-progress").hidden = !up;
@@ -588,7 +593,7 @@ function progress(prefix, up) {
 
 let lastCheck = null; // { found, at } from the Settings button
 function renderAppUpdateSettings() {
-  const up = S.updating, ready = S.app_update;
+  const up = S.updating, ready = appAvail();
   progress("s", up);
   $("s-check").hidden = !!up;
   $("s-update").hidden = !!up || !ready;
@@ -613,7 +618,7 @@ $("s-check").onclick = () => busy($("s-check"), async () => {
 });
 
 async function askUpdate(btn) {
-  const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + S.app_update + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
+  const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + appAvail() + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
   if (ok) busy(btn, () => call("update_app"));
 }
 $("app-update").onclick = () => askUpdate($("app-update"));
