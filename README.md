@@ -1,10 +1,8 @@
 # Sterling Quest Sync
 
+**For use with [Sterling Quest Tracker](https://github.com/SterlingAddons/SterlingQuest).** Start there for the big picture of what Sterling does and how the pieces fit together. This page is all about the desktop app.
+
 **Status:** Still in heavy development and not finished yet. Things are mostly settled now, but big changes can still come with an update.
-
-Sterling began as a little project for me and a few close friends, so we could keep our quests in step while we adventure together, even with different schedules. It's been a lot of fun to build, so I'm sharing it here in case anyone else finds it useful. It's shaped by how we like to play, and it gets updates whenever I can find the time. Ideas and bug reports are always welcome.
-
-> Built by Kael with the help of Claude Opus, an AI model by Anthropic. The ideas, testing and decisions are mine; much of the code was written with Claude. Everything is tested in game with friends.
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="49%" alt="Home: up to date, favourite partners and recent activity">
@@ -85,3 +83,5 @@ npx @tauri-apps/cli@2.12.4 build                # the Windows installer, from th
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+> Built by Kael with the help of Claude, an AI model by Anthropic. The ideas, testing and decisions are mine; much of the code was written with Claude. Everything is tested in game with friends.
