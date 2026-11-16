@@ -64,6 +64,10 @@ pub struct Look {
     /// The game's class token, e.g. "DRUID".
     pub class: Option<String>,
     pub race: Option<String>,
+    /// The person's first name or nickname as set in Sterling ("Bran"), shown above the character name.
+    pub nick: Option<String>,
+    /// GetServerTime() of the last live sync with this partner in game.
+    pub seen: Option<i64>,
 }
 
 const CLASSES: [&str; 13] = [
@@ -75,6 +79,8 @@ fn look(t: &Table) -> Look {
         level: int(t, "level").filter(|l| (1..=100).contains(l)),
         class: text(t, "class").filter(|c| CLASSES.contains(c)).map(String::from),
         race: text(t, "race").filter(|r| RE_NAME.is_match(r)).map(String::from),
+        nick: text(t, "nick").filter(|r| RE_NAME.is_match(r)).map(String::from),
+        seen: int(t, "seen").filter(|s| valid_time(*s)),
     }
 }
 
@@ -545,16 +551,18 @@ mod tests {
     #[test]
     fn reads_level_class_and_race_for_the_window() {
         let text = format!(
-            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"level\"] = 41, [\"class\"] = \"DRUID\", [\"race\"] = \"Troll\", [\"sterling\"] = \"0.2.40\", [\"partners\"] = {{ [\"{BRAN}\"] = {{ [\"packet\"] = \"AB\", [\"change\"] = 1, [\"level\"] = 900, [\"class\"] = \"<b>MAGE\", [\"race\"] = \"Night Elf\" }} }} }} }} }}"
+            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"level\"] = 41, [\"class\"] = \"DRUID\", [\"race\"] = \"Troll\", [\"sterling\"] = \"0.2.40\", [\"partners\"] = {{ [\"{BRAN}\"] = {{ [\"packet\"] = \"AB\", [\"change\"] = 1, [\"level\"] = 900, [\"class\"] = \"<b>MAGE\", [\"race\"] = \"Night Elf\", [\"nick\"] = \"Bran\", [\"seen\"] = 1794770100 }} }} }} }} }}"
         );
         let o = parse_outbox(&text).unwrap();
         let c = &o.characters[0];
-        assert_eq!(c.look, Look { level: Some(41), class: Some("DRUID".into()), race: Some("Troll".into()) });
+        assert_eq!(c.look, Look { level: Some(41), class: Some("DRUID".into()), race: Some("Troll".into()), nick: None, seen: None });
         assert_eq!(c.sterling.as_deref(), Some("0.2.40"));
         let p = &c.partners[0].look;
         assert_eq!(p.level, None, "out of range");
         assert_eq!(p.class, None, "not a class token");
         assert_eq!(p.race.as_deref(), Some("Night Elf"));
+        assert_eq!(p.nick.as_deref(), Some("Bran"));
+        assert_eq!(p.seen, Some(1794770100));
     }
 
     #[test]
