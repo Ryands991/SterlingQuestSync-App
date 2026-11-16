@@ -53,6 +53,29 @@ pub struct PartnerOut {
     /// Whether this partner has Sterling Quest Sync, as their Sterling last told ours in game.
     #[serde(default)]
     pub app: PartnerApp,
+    #[serde(default)]
+    pub look: Look,
+}
+
+/// Level, class and race for the app's window only. Never uploaded or written to the inbox.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    pub level: Option<i64>,
+    /// The game's class token, e.g. "DRUID".
+    pub class: Option<String>,
+    pub race: Option<String>,
+}
+
+const CLASSES: [&str; 13] = [
+    "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID", "DEATHKNIGHT", "MONK", "DEMONHUNTER", "EVOKER",
+];
+
+fn look(t: &Table) -> Look {
+    Look {
+        level: int(t, "level").filter(|l| (1..=100).contains(l)),
+        class: text(t, "class").filter(|c| CLASSES.contains(c)).map(String::from),
+        race: text(t, "race").filter(|r| RE_NAME.is_match(r)).map(String::from),
+    }
 }
 
 /// `app = "0.1.9"` (has the app), `app = false` (seen in game, no app), or missing (not seen since the update).
@@ -80,6 +103,11 @@ pub struct CharacterOut {
     /// Auto-pairing: codes this character received in game from a Sterling partner, by sender GUID.
     #[serde(default)]
     pub codes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub look: Look,
+    /// Sterling's own version, for the window.
+    #[serde(default)]
+    pub sterling: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -172,7 +200,7 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
                     },
                     None => PartnerApp::Unknown,
                 };
-                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name, app });
+                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name, app, look: look(p) });
             }
         }
         let mut applied = BTreeMap::new();
@@ -199,6 +227,8 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
             }
         }
         out.characters.push(CharacterOut {
+            look: look(c),
+            sterling: text(c, "sterling").filter(|v| valid_version(v)).map(String::from),
             codes,
             guid: guid.clone(),
             name: name.to_string(),
@@ -510,6 +540,21 @@ mod tests {
         assert_eq!(app("Player-6800-0000000C"), PartnerApp::Unknown);
         assert_eq!(app("Player-6800-0000000D"), PartnerApp::Unknown, "bad version ignored");
         assert!(o.skipped.iter().any(|s| s.contains("bad app version")));
+    }
+
+    #[test]
+    fn reads_level_class_and_race_for_the_window() {
+        let text = format!(
+            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"level\"] = 41, [\"class\"] = \"DRUID\", [\"race\"] = \"Troll\", [\"sterling\"] = \"0.2.40\", [\"partners\"] = {{ [\"{BRAN}\"] = {{ [\"packet\"] = \"AB\", [\"change\"] = 1, [\"level\"] = 900, [\"class\"] = \"<b>MAGE\", [\"race\"] = \"Night Elf\" }} }} }} }} }}"
+        );
+        let o = parse_outbox(&text).unwrap();
+        let c = &o.characters[0];
+        assert_eq!(c.look, Look { level: Some(41), class: Some("DRUID".into()), race: Some("Troll".into()) });
+        assert_eq!(c.sterling.as_deref(), Some("0.2.40"));
+        let p = &c.partners[0].look;
+        assert_eq!(p.level, None, "out of range");
+        assert_eq!(p.class, None, "not a class token");
+        assert_eq!(p.race.as_deref(), Some("Night Elf"));
     }
 
     #[test]

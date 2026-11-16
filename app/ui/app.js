@@ -304,58 +304,99 @@ function eventRow(a) {
   return r;
 }
 
-function statusCell(p) {
-  const td = el("td");
-  if (p.active) {
-    td.append(el("div", p.last_copy ? "good-t" : "muted", p.last_copy ? (p.applied ? "Synced, in game" : "Synced, /reload to see it") : "Paired, no copy yet"));
-  } else if (p.ended_reason === "replaced") {
-    td.append(el("div", "bad-t", "Missing key, resync"), el("div", "small muted", "They reinstalled or paired again. Pair again with a new code."));
-  } else if (p.ended_reason === "deleted") {
-    td.append(el("div", "muted", "Account deleted"));
-  } else {
-    td.append(el("div", "muted", "Removed"));
+const CLASS_NAMES = { WARRIOR: "Warrior", PALADIN: "Paladin", HUNTER: "Hunter", ROGUE: "Rogue", PRIEST: "Priest", SHAMAN: "Shaman", MAGE: "Mage", WARLOCK: "Warlock", DRUID: "Druid", DEATHKNIGHT: "Death Knight", MONK: "Monk", DEMONHUNTER: "Demon Hunter", EVOKER: "Evoker" };
+const classCls = (look) => (look && CLASS_NAMES[look.class] ? " c-" + look.class : "");
+
+// One row in Sterling's in-game style: frame, name, status line, right side, menu.
+function prow(o) {
+  const row = el("div", "prow" + (o.you ? " you" : ""));
+  if (o.you) row.append(el("span", "ptag", "YOU"));
+  const dim = !!o.dim;
+  row.append(el("div", "pf" + (dim ? " dim" : classCls(o.look)), (o.name || "?").charAt(0).toUpperCase()));
+  const m = el("div", "pm");
+  m.append(el("div", "pn" + (dim ? " dim" : classCls(o.look)), o.name || "Sterling partner"));
+  const line = el("div", "pl");
+  const bits = [];
+  if (o.status) bits.push(el("span", o.statusCls || "", o.status));
+  if (o.look && o.look.level) bits.push("Lvl " + o.look.level);
+  for (const b of o.extra || []) if (b) bits.push(b);
+  bits.forEach((b, i) => { if (i) line.append(" · "); line.append(b); });
+  m.append(line);
+  row.append(m);
+  const r = el("div", "pr");
+  if (o.right) { r.append(el("div", "s " + (o.rightCls || ""), o.right[0])); if (o.right[1]) r.append(o.right[1]); }
+  row.append(r);
+  if (o.menu) {
+    const b = el("button", "ico", "⋯"); b.type = "button"; b.title = "More"; b.setAttribute("aria-label", "More for " + (o.name || "partner"));
+    b.onclick = o.menu; row.append(b);
   }
-  return td;
+  return row;
 }
 
 function renderPartners(c) {
   $("p-sub").replaceChildren();
-  if (c) $("p-sub").append("Syncing with ", el("b", "", c.name), ". " + liveCount(c) + " of 10.");
+  const you = $("p-you"); you.replaceChildren();
   const body = $("p-rows"); body.replaceChildren();
-  const list = c ? c.partners.filter((p) => !hidden.has(p.pairing_id)) : [];
-  if (!list.length && !(c && c.unpaired.length)) { const tr = el("tr"); const td = el("td", "empty", "No partners yet. Pair a friend to start."); td.colSpan = 4; tr.append(td); body.append(tr); }
-  for (const u of (c ? c.unpaired : [])) {
-    const tr = el("tr");
-    const name = el("td"); name.append(el("div", "n", u.name || "Sterling partner"), el("div", "small muted", "From Sterling"));
-    const st = el("td");
-    const [head, sub] = u.offered ? ["Pairing on its own", "Next time you're both online in game."]
-      : u.app === "yes" ? ["Has the app", "Not paired yet. Send a code from Pair a friend."]
-      : u.app === "no" ? ["Doesn't have the app yet", "Ask them to install Sterling Quest Sync."]
-      : ["Not seen yet", "Shows once you're both online in game."];
-    st.append(el("div", "warn-t", head), el("div", "small muted", sub));
-    const act = el("td"); const b = el("button", "btn small", "Pair"); b.type = "button"; b.onclick = () => go("pair"); act.append(b);
-    tr.append(name, el("td", "muted", "None"), st, act); body.append(tr);
-  }
-  for (const p of list) {
-    const tr = el("tr");
-    const name = el("td"); name.append(el("div", p.active ? "n" : "n muted", p.name), el("div", "small muted", p.realm));
-    const last = el("td", p.last_copy ? "" : "muted", p.last_copy ? ago(p.last_copy) : "None");
-    const act = el("td");
-    if (p.active) {
-      const b = el("button", "btn small ghost", "Stop syncing"); b.type = "button";
-      b.onclick = async () => {
+  $("p-count").textContent = c ? liveCount(c) + " / 10" : "";
+  if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
+  const linked = c.partners.filter((p) => p.active).length;
+  const inSterling = c.unpaired.length + linked;
+  $("p-sub").append(inSterling ? linked + " of " + inSterling + " syncing through the app." : "Syncing with nobody yet.");
+
+  const look = c.look || {};
+  const race = [look.race, CLASS_NAMES[look.class]].filter(Boolean).join(" ");
+  you.append(prow({
+    you: true, name: c.name, look,
+    extra: [race, (c.sterling || S.sterling_version) ? "Sterling " + (c.sterling || S.sterling_version) : "", "App " + S.version],
+    right: c.ready ? ["Ready to sync", "save waiting"] : ["Up to date", S.last_sync ? "synced " + ago(S.last_sync) : ""],
+    rightCls: c.ready ? "s-wait" : "s-ok",
+  }));
+
+  const unpaired = new Set(c.unpaired.map((u) => u.guid));
+  const list = c.partners.filter((p) => !hidden.has(p.pairing_id) && !(!p.active && unpaired.has(p.guid)));
+  if (!list.length && !c.unpaired.length) body.append(el("div", "empty", "No partners yet. Pair a friend to start."));
+
+  for (const p of list.filter((p) => p.active)) {
+    body.append(prow({
+      name: p.name, look: p.look,
+      status: p.last_copy ? (p.applied ? "Syncing" : "Syncing, /reload to see it") : "Paired, no copy yet",
+      statusCls: p.last_copy ? "s-ok" : "",
+      extra: [p.realm],
+      right: p.last_copy ? ["Got a copy", ago(p.last_copy)] : ["Waiting", "for their next save"],
+      menu: async () => {
         const ok = await dialog("Stop syncing with " + p.name + "?", [para("Their copies stop coming in and yours stop going out. You can pair again later with a new code.", "muted")], [["Cancel", false, "ghost"], ["Stop syncing", true, "bad"]]);
-        if (ok) busy(b, () => call("end_pairing", { id: p.pairing_id }));
-      };
-      act.append(b);
-    } else {
-      if (p.ended_reason === "replaced") { const r = el("button", "btn small", "Resync"); r.type = "button"; r.onclick = () => go("pair"); act.append(r, " "); }
-      const h = el("button", "btn small ghost", "Hide"); h.type = "button";
-      h.onclick = () => { hidden.add(p.pairing_id); try { localStorage.setItem("hiddenPairs", JSON.stringify([...hidden])); } catch (_) {} renderApp(); };
-      act.append(h);
-    }
-    tr.append(name, last, statusCell(p), act);
-    body.append(tr);
+        if (ok) busy(null, () => call("end_pairing", { id: p.pairing_id }));
+      },
+    }));
+  }
+  for (const u of c.unpaired) {
+    const [status, cls, right] = u.offered ? ["Pairing on its own", "s-wait", ["Waiting", "next time you're both online"]]
+      : u.app === "yes" ? ["Has the app", "s-wait", ["Not paired", "send a code"]]
+      : u.app === "no" ? ["Doesn't have the app yet", "s-bad", ["Live sync only", "when you're both online"]]
+      : ["Not seen yet", "", ["Live sync only", "until you're both online"]];
+    body.append(prow({
+      name: u.name, look: u.look, status, statusCls: cls, right, rightCls: cls === "s-bad" ? "" : cls,
+      menu: async () => {
+        const go2 = await dialog(u.name || "Sterling partner", [para(u.app === "no" ? "They need Sterling Quest Sync installed first. Once they have it, pairing happens on its own when you're both online in game." : "This usually pairs on its own when you're both online in game. You can also pair now with a code.", "muted")], [["Close", false, "ghost"], ["Pair a friend", true]]);
+        if (go2) go("pair");
+      },
+    }));
+  }
+  for (const p of list.filter((p) => !p.active)) {
+    const replaced = p.ended_reason === "replaced";
+    const why = replaced ? "Missing key, resync" : p.ended_reason === "deleted" ? "Account deleted" : "Stopped syncing";
+    body.append(prow({
+      name: p.name, look: p.look, dim: !replaced,
+      status: why, statusCls: replaced ? "s-bad" : "",
+      extra: [p.ended_at ? new Date(p.ended_at * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""],
+      menu: async () => {
+        const btns = [["Close", null, "ghost"], ["Hide", "hide"]];
+        if (replaced) btns.push(["Pair again", "pair"]);
+        const v = await dialog(p.name, [para(replaced ? "They reinstalled or paired again from somewhere else. Pair again with a new code." : "This pairing has ended. Hide it from the list, or pair again any time with a new code.", "muted")], btns);
+        if (v === "pair") go("pair");
+        if (v === "hide") { hidden.add(p.pairing_id); try { localStorage.setItem("hiddenPairs", JSON.stringify([...hidden])); } catch (_) {} renderApp(); }
+      },
+    }));
   }
 }
 

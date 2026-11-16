@@ -124,6 +124,32 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .empty { padding: 8px 0; color: var(--muted); font-size: 14px; }
 
 .tablecard { padding: 4px 18px; overflow-x: auto; }
+
+/* Partners: laid out like Sterling's list in game */
+.plist { background: var(--card); border: 1px solid var(--brass); border-radius: 4px; padding: 6px 8px; }
+.plist-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 10px; border-bottom: 1px solid var(--line); }
+.plist-head .t { font: 600 17px var(--title); color: var(--gold); }
+.plist-head .t span { font: 14px "Source Sans 3", "Segoe UI", sans-serif; color: var(--muted); margin-left: 6px; }
+.prow { display: flex; align-items: center; gap: 12px; padding: 9px 8px; border-bottom: 1px solid var(--line2); border-radius: 3px; }
+.prow:last-child { border-bottom: 0; }
+.prow:hover { background: #3a2f25; }
+.prow.you { background: var(--well); border: 1px solid var(--line); margin: 8px 0 4px; }
+.prow.you:hover { background: var(--well); }
+.pf { flex: 0 0 38px; height: 38px; display: grid; place-items: center; border: 2px solid var(--brass); border-radius: 3px; background: var(--well); font: 700 18px var(--title); color: var(--gold); box-shadow: inset 0 0 0 1px #000a; }
+.pf.dim { border-color: var(--line); color: var(--muted); opacity: .6; }
+.pm { flex: 1; min-width: 0; }
+.pn { font-weight: 700; font-size: 15px; color: var(--text); }
+.pn.dim { color: var(--muted); }
+.pl { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr { text-align: right; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.pr .s { font-weight: 700; font-size: 14px; color: var(--text); }
+.s-ok { color: var(--good) !important; } .s-wait { color: #e0b45a !important; } .s-bad { color: var(--bad) !important; }
+.ptag { flex: 0 0 34px; font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--gold); }
+.ico { flex: 0 0 30px; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; }
+.ico:hover, .ico:focus-visible { border-color: var(--brass-hi); color: var(--gold); }
+.c-WARRIOR { color: #c69b6d; } .c-PALADIN { color: #f48cba; } .c-HUNTER { color: #aad372; } .c-ROGUE { color: #fff468; }
+.c-PRIEST { color: #ffffff; } .c-SHAMAN { color: #0070dd; } .c-MAGE { color: #3fc7eb; } .c-WARLOCK { color: #8788ee; }
+.c-DRUID { color: #ff7c0a; } .c-DEATHKNIGHT { color: #c41e3a; } .c-MONK { color: #00ff98; } .c-DEMONHUNTER { color: #a330c9; } .c-EVOKER { color: #33937f; }
 .ptable { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ptable th { text-align: left; padding: 12px 8px 10px 0; font-size: 12px; letter-spacing: 1px; color: var(--muted); border-bottom: 1px solid var(--line); font-weight: 700; }
 .ptable td { padding: 14px 8px 14px 0; border-bottom: 1px solid var(--line2); vertical-align: middle; }

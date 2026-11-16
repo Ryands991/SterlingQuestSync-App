@@ -21,7 +21,7 @@ use tauri_plugin_updater::UpdaterExt;
 
 use sqs_core::api::{self, Api, Client};
 use sqs_core::engine::{self, Report};
-use sqs_core::formats::{parse_outbox, AppInfo, Kind, Outbox, PartnerApp};
+use sqs_core::formats::{parse_outbox, AppInfo, CharacterOut, Kind, Look, Outbox, PartnerApp};
 use sqs_core::game::{GameCheck, SaveWatcher};
 use sqs_core::keystore::{KeyStore, SystemStore};
 use sqs_core::paths::{self, GameFolder};
@@ -213,6 +213,8 @@ struct PartnerStatus {
     last_copy: Option<i64>,
     /// Sterling has applied that copy in game.
     applied: bool,
+    /// Level, class and race from Sterling, for the window only.
+    look: Look,
 }
 
 #[derive(Serialize, Clone)]
@@ -223,6 +225,9 @@ struct CharStatus {
     /// Game time of the last save the app has seen, if any.
     saved: Option<i64>,
     ready: bool,
+    look: Look,
+    /// Sterling's version as this character last saved it.
+    sterling: Option<String>,
     partners: Vec<PartnerStatus>,
     /// Sterling partners with no live pairing in the app yet (names only if Sterling wrote them).
     unpaired: Vec<Unpaired>,
@@ -236,6 +241,7 @@ struct Unpaired {
     offered: bool,
     /// "yes", "no" or "unknown": whether their Sterling said in game that they have the app.
     app: &'static str,
+    look: Look,
 }
 
 #[derive(Serialize, Clone)]
@@ -296,6 +302,8 @@ fn build_status(st: &AppState) -> Status {
         for (guid, name, realm) in guids {
             let inbox = sess.state.inbox.chars.get(&guid);
             let applied = saved.get(guid.as_str()).map(|x| x.1);
+            let me: Option<&CharacterOut> = outboxes.iter().flat_map(|o| &o.characters).find(|c| c.guid == guid);
+            let look_of = |g: &str| me.and_then(|c| c.partners.iter().find(|p| p.guid == g)).map(|p| p.look.clone()).unwrap_or_default();
             let partners = sess
                 .state
                 .pairs
@@ -313,6 +321,7 @@ fn build_status(st: &AppState) -> Status {
                         ended_at: p.ended_at,
                         last_copy: last.map(|x| x.time),
                         applied: last.is_some_and(|x| applied.and_then(|a| a.get(&p.partner_guid)).is_some_and(|n| *n >= x.seq)),
+                        look: look_of(&p.partner_guid),
                     }
                 })
                 .collect();
@@ -332,9 +341,12 @@ fn build_status(st: &AppState) -> Status {
                         PartnerApp::No => "no",
                         PartnerApp::Unknown => "unknown",
                     },
+                    look: p.look.clone(),
                 })
                 .collect();
             characters.push(CharStatus {
+                look: me.map(|c| c.look.clone()).unwrap_or_default(),
+                sterling: me.and_then(|c| c.sterling.clone()),
                 unpaired,
                 ready: ready.contains(&guid),
                 saved: saved.get(guid.as_str()).map(|x| x.0),

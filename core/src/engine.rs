@@ -659,11 +659,11 @@ mod tests {
     }
 
     fn outbox(saved: i64, packet: &str, removed: Option<i64>) -> Outbox {
-        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false, name: None, app: PartnerApp::Unknown }];
+        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false, name: None, app: PartnerApp::Unknown, look: Default::default() }];
         if let Some(ch) = removed {
-            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true, name: None, app: PartnerApp::Unknown };
+            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true, name: None, app: PartnerApp::Unknown, look: Default::default() };
         }
-        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false, name: None, app: PartnerApp::Has("0.1.9".into()) });
+        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false, name: None, app: PartnerApp::Has("0.1.9".into()), look: Default::default() });
         Outbox {
             characters: vec![CharacterOut {
                 guid: ME.into(),
@@ -675,6 +675,8 @@ mod tests {
                 partners,
                 applied: Default::default(),
                 codes: Default::default(),
+                look: Default::default(),
+                sterling: None,
             }],
             skipped: vec![],
         }

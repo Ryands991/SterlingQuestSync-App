@@ -147,11 +147,12 @@
   </main>
 
   <main class="page" id="page-partners" hidden>
-    <div class="pagehead">
-      <div><h1>Partners</h1><p class="muted" id="p-sub"></p></div>
-      <button type="button" class="btn primary" data-page="pair">Pair a friend</button>
-    </div>
-    <section class="card tablecard"><table class="ptable"><thead><tr><th>NAME</th><th>LAST COPY</th><th>STATUS</th><th><span class="sr">Actions</span></th></tr></thead><tbody id="p-rows"></tbody></table></section>
+    <div><h1>Partners</h1><p class="muted" id="p-sub"></p></div>
+    <section class="plist">
+      <div id="p-you"></div>
+      <div class="plist-head"><div class="t">Partners<span id="p-count"></span></div><button type="button" class="btn small" data-page="pair">+ Pair a friend</button></div>
+      <div id="p-rows"></div>
+    </section>
     <p class="small muted">Changes here reach the game at your next login or /reload. Changes made in game show up here after the game saves. If both happen in one session, removing wins.</p>
   </main>
 
