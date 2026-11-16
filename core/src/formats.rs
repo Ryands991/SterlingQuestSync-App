@@ -262,10 +262,12 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
             (Some(t), Some(ch)) if valid_time(ch) => {
                 Some(Favs::clean(t.list.iter().filter_map(|v| v.as_str().map(String::from)).filter(|g| g != guid), ch))
             }
-            (Some(_), _) => {
-                out.skipped.push(format!("{guid}: favourites without a good change time"));
+            (Some(_), Some(_)) => {
+                out.skipped.push(format!("{guid}: favourites with a bad change time"));
                 None
             }
+            // Sterling leaves favs_change out until favourites were ever set: nothing to take yet.
+            (Some(_), None) => None,
             _ => None,
         };
         out.characters.push(CharacterOut {
@@ -638,6 +640,16 @@ mod tests {
         assert_eq!(f.list.len(), 5, "bad GUID, self and repeats dropped, capped at 5");
         assert_eq!(f.list[0], "Player-6800-00000000");
         assert_eq!(f.change, 1794770000);
+    }
+
+    #[test]
+    fn favourites_without_a_change_time_are_quietly_ignored() {
+        let text = format!(
+            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"favs\"] = {{ }} }} }} }}"
+        );
+        let o = parse_outbox(&text).unwrap();
+        assert!(o.characters[0].favs.is_none());
+        assert!(o.skipped.is_empty(), "not an error: {:?}", o.skipped);
     }
 
     #[test]
