@@ -15,7 +15,7 @@ body:
 
         Rather keep it private, or no GitHub account? Email **support@sterlingaddons.com** instead.
 
-        Found a security bug? Please use **Report a security problem** on the previous page so it stays private.
+        Found a security bug? Please use **Report a security vulnerability** on the previous page so it stays private.
   - type: dropdown
     id: kind
     attributes:
@@ -33,7 +33,7 @@ body:
     attributes:
       label: Their character
       description: Name and realm, as the app or Sterling shows it.
-      placeholder: "Brannoc Ashvale, CAMWOW US2 Realm 2 PvP"
+      placeholder: "Character Name, Realm Name"
     validations:
       required: true
   - type: input
@@ -41,12 +41,12 @@ body:
     attributes:
       label: Your character (optional)
       description: Helps find the pairing between you. Leave it out if you'd rather not say.
-      placeholder: "Kaelith Emberfall, CAMWOW US2 Realm 2 PvP"
+      placeholder: "Character Name, Realm Name"
   - type: input
     id: when
     attributes:
       label: When did it start?
-      placeholder: "Nov 15, around 8 PM Pacific"
+      placeholder: "Date, and roughly what time"
   - type: textarea
     id: details
     attributes:

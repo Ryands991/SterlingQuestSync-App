@@ -1,8 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Report a security problem
-    url: https://github.com/SterlingAddons/SterlingQuestSync-App/security/advisories/new
-    about: A bug that could let someone read, change or wipe other people's data. This stays private between you and the owner.
   - name: Privacy and what's stored
     url: https://github.com/SterlingAddons/SterlingQuestSync-Server#privacy
     about: What the sync server keeps, for how long, and how to delete it.
