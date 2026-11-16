@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{Api, Character, Pairing, Upload};
 use crate::companion;
-use crate::formats::{valid_guid, AppInfo, valid_packet, InOffer, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_CODE, RE_PAIR_KEY};
+use crate::formats::{valid_guid, AppInfo, valid_packet, InOffer, PartnerApp, InPacket, InPair, Inbox, Kind, Outbox, PairStatus, RE_PAIR_CODE, RE_PAIR_KEY};
 use crate::safety::{Root, SafeFs};
 use crate::{Error, Result};
 
@@ -285,11 +285,12 @@ fn redeem_codes(api: &dyn Api, st: &mut State, rep: &mut Report, outboxes: &[Out
 
 /// Keeps one fresh code per unpaired Sterling partner in the inbox, and cancels codes no longer needed.
 fn offer_codes(api: &dyn Api, st: &mut State, rep: &mut Report, outboxes: &[Outbox], pairings: &[Pairing], now: i64) {
-    // Who should get a code: Sterling partners of characters on this PC with no live pairing.
+    // Who should get a code: Sterling partners of characters on this PC with no live pairing, whose
+    // Sterling told ours in game that they have the app (no point using up a code slot otherwise).
     let mut want: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for c in outboxes.iter().flat_map(|o| &o.characters) {
         let list = want.entry(c.guid.clone()).or_default();
-        for p in c.partners.iter().filter(|p| !p.removed && valid_guid(&p.guid) && p.guid != c.guid) {
+        for p in c.partners.iter().filter(|p| !p.removed && valid_guid(&p.guid) && p.guid != c.guid && matches!(p.app, PartnerApp::Has(_))) {
             if active_pair(pairings, &c.guid, &p.guid).is_none() && !list.contains(&p.guid) {
                 list.push(p.guid.clone());
             }
@@ -658,11 +659,11 @@ mod tests {
     }
 
     fn outbox(saved: i64, packet: &str, removed: Option<i64>) -> Outbox {
-        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false, name: None }];
+        let mut partners = vec![PartnerOut { guid: BRAN.into(), packet: Some(packet.into()), change: 1, removed: false, name: None, app: PartnerApp::Unknown }];
         if let Some(ch) = removed {
-            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true, name: None };
+            partners[0] = PartnerOut { guid: BRAN.into(), packet: None, change: ch, removed: true, name: None, app: PartnerApp::Unknown };
         }
-        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false, name: None });
+        partners.push(PartnerOut { guid: ALT.into(), packet: Some("ALTCOPY".into()), change: 1, removed: false, name: None, app: PartnerApp::Has("0.1.9".into()) });
         Outbox {
             characters: vec![CharacterOut {
                 guid: ME.into(),
@@ -812,6 +813,28 @@ mod tests {
         let r = sync(&api, &fs_, &mut st, &[outbox(1_794_770_000, "C", None)], None, 1_794_770_000 + 86_400 - 3600).unwrap();
         assert_eq!(r.auto_offered, 1);
         assert_eq!(api.cancelled.borrow().as_slice(), ["c1"]);
+    }
+
+    #[test]
+    fn no_code_for_partners_without_the_app() {
+        let (_t, fs_) = setup();
+        let api = Fake::default();
+        let mut st = load_state(&fs_);
+        // Neither paired; Bran hasn't been seen since the update, ALT has no app.
+        let mut o = outbox(1_794_770_000, "C", None);
+        o.characters[0].partners[1].app = PartnerApp::No;
+        let r = sync(&api, &fs_, &mut st, &[o.clone()], None, 1_794_770_100).unwrap();
+        assert_eq!(r.auto_offered, 0);
+        assert!(api.codes.borrow().is_empty());
+        // ALT installs the app: their Sterling says so, and a code follows.
+        o.characters[0].partners[1].app = PartnerApp::Has("0.1.9".into());
+        let r = sync(&api, &fs_, &mut st, &[o.clone()], None, 1_794_770_200).unwrap();
+        assert_eq!(r.auto_offered, 1);
+        // And uninstalls: the code is cancelled.
+        o.characters[0].partners[1].app = PartnerApp::No;
+        sync(&api, &fs_, &mut st, &[o], None, 1_794_770_300).unwrap();
+        assert!(st.offers.is_empty());
+        assert_eq!(api.cancelled.borrow().len(), 1);
     }
 
     #[test]

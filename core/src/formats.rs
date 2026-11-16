@@ -50,6 +50,18 @@ pub struct PartnerOut {
     /// Display name, if Sterling wrote one. Shown only in this PC's window; never uploaded.
     #[serde(default)]
     pub name: Option<String>,
+    /// Whether this partner has Sterling Quest Sync, as their Sterling last told ours in game.
+    #[serde(default)]
+    pub app: PartnerApp,
+}
+
+/// `app = "0.1.9"` (has the app), `app = false` (seen in game, no app), or missing (not seen since the update).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum PartnerApp {
+    #[default]
+    Unknown,
+    No,
+    Has(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -149,7 +161,18 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox> {
                     None => None,
                 };
                 let name = text(p, "name").filter(|n| RE_NAME.is_match(n)).map(String::from);
-                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name });
+                let app = match p.get("app") {
+                    Some(v) if v.as_bool() == Some(false) => PartnerApp::No,
+                    Some(v) => match v.as_str() {
+                        Some(ver) if valid_version(ver) => PartnerApp::Has(ver.to_string()),
+                        _ => {
+                            out.skipped.push(format!("{guid}: partner with a bad app version"));
+                            PartnerApp::Unknown
+                        }
+                    },
+                    None => PartnerApp::Unknown,
+                };
+                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name, app });
             }
         }
         let mut applied = BTreeMap::new();
@@ -468,6 +491,25 @@ mod tests {
         assert!(!c.partners.iter().any(|p| p.guid == "not-a-guid"));
         assert_eq!(c.applied.get(BRAN), Some(&48213));
         assert!(o.skipped.len() >= 3);
+    }
+
+    #[test]
+    fn reads_whether_each_partner_has_the_app() {
+        let row = |g: &str, app: &str| format!("[\"{g}\"] = {{ [\"packet\"] = \"AB\", [\"change\"] = 1{app} }},");
+        let text = format!(
+            "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"partners\"] = {{ {} {} {} {} }} }} }} }}",
+            row("Player-6800-0000000A", ", [\"app\"] = \"0.1.9\""),
+            row("Player-6800-0000000B", ", [\"app\"] = false"),
+            row("Player-6800-0000000C", ""),
+            row("Player-6800-0000000D", ", [\"app\"] = \"1.0; os.exit()\""),
+        );
+        let o = parse_outbox(&text).unwrap();
+        let app = |g: &str| o.characters[0].partners.iter().find(|p| p.guid == g).unwrap().app.clone();
+        assert_eq!(app("Player-6800-0000000A"), PartnerApp::Has("0.1.9".into()));
+        assert_eq!(app("Player-6800-0000000B"), PartnerApp::No);
+        assert_eq!(app("Player-6800-0000000C"), PartnerApp::Unknown);
+        assert_eq!(app("Player-6800-0000000D"), PartnerApp::Unknown, "bad version ignored");
+        assert!(o.skipped.iter().any(|s| s.contains("bad app version")));
     }
 
     #[test]

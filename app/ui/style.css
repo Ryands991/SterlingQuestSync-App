@@ -13,6 +13,14 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.45 "Source Sans 3", "Segoe UI", sans-serif; overflow: hidden; }
 a { color: var(--gold); } a:hover { color: var(--brass-hi); }
+
+/* Scroll bars in Leather and Brass. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--well); }
+::-webkit-scrollbar-thumb { background: var(--brass); border: 3px solid var(--well); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold); }
+::-webkit-scrollbar-corner { background: var(--well); }
+::-webkit-scrollbar-button { display: none; }
 b { font-weight: 600; color: var(--text); }
 [hidden] { display: none !important; }
 .frame { height: 100vh; display: flex; flex-direction: column; border: 1px solid var(--brass); }

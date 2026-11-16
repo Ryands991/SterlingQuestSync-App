@@ -288,7 +288,12 @@ function unpairedNote(c) {
     ? "Sterling also syncs with " + list + ". " + "They aren't paired in the app yet."
     : n + (n === 1 ? " of your Sterling partners isn't" : " of your Sterling partners aren't") + " paired in the app yet.";
   box.append(el("div", "small", head));
-  box.append(el("div", "small muted", "If they have the app, it pairs on its own next time you're both online in game. Or send a code from Pair a friend."));
+  const by = (k) => c.unpaired.filter((u) => u.app === k).length;
+  const lines = [];
+  if (by("yes")) lines.push(by("yes") === n ? "They have the app, so it pairs on its own next time you're both online in game." : by("yes") + " of them have the app and will pair on their own when you're both online.");
+  if (by("no")) lines.push(by("no") === n ? "They don't have the app yet. Ask them to install Sterling Quest Sync." : by("no") + " don't have the app yet.");
+  if (by("unknown")) lines.push(by("unknown") === n ? "Whether they have the app shows once you're both online in game." : by("unknown") + " not seen in game yet.");
+  box.append(el("div", "small muted", lines.join(" ")));
   const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); box.append(b);
   return box;
 }
@@ -323,8 +328,11 @@ function renderPartners(c) {
     const tr = el("tr");
     const name = el("td"); name.append(el("div", "n", u.name || "Sterling partner"), el("div", "small muted", "From Sterling"));
     const st = el("td");
-    if (u.offered) st.append(el("div", "warn-t", "Pairing on its own"), el("div", "small muted", "Next time you're both online in game, if they have the app."));
-    else st.append(el("div", "warn-t", "Not paired in the app"), el("div", "small muted", "They need the app and a pairing code."));
+    const [head, sub] = u.offered ? ["Pairing on its own", "Next time you're both online in game."]
+      : u.app === "yes" ? ["Has the app", "Not paired yet. Send a code from Pair a friend."]
+      : u.app === "no" ? ["Doesn't have the app yet", "Ask them to install Sterling Quest Sync."]
+      : ["Not seen yet", "Shows once you're both online in game."];
+    st.append(el("div", "warn-t", head), el("div", "small muted", sub));
     const act = el("td"); const b = el("button", "btn small", "Pair"); b.type = "button"; b.onclick = () => go("pair"); act.append(b);
     tr.append(name, el("td", "muted", "None"), st, act); body.append(tr);
   }

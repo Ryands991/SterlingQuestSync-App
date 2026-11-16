@@ -59,7 +59,7 @@ impl Pc {
         let mut p = String::new();
         for (g, packet, change) in partners {
             match packet {
-                Some(pk) => p.push_str(&format!("[\"{g}\"] = {{ [\"packet\"] = \"{pk}\", [\"change\"] = {change} }},\n")),
+                Some(pk) => p.push_str(&format!("[\"{g}\"] = {{ [\"packet\"] = \"{pk}\", [\"change\"] = {change}, [\"app\"] = \"0.1.9\" }},\n")),
                 None => p.push_str(&format!("[\"{g}\"] = {{ [\"removed\"] = true, [\"change\"] = {change} }},\n")),
             }
         }

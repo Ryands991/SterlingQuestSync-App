@@ -21,7 +21,7 @@ use tauri_plugin_updater::UpdaterExt;
 
 use sqs_core::api::{self, Api, Client};
 use sqs_core::engine::{self, Report};
-use sqs_core::formats::{parse_outbox, AppInfo, Kind, Outbox};
+use sqs_core::formats::{parse_outbox, AppInfo, Kind, Outbox, PartnerApp};
 use sqs_core::game::{GameCheck, SaveWatcher};
 use sqs_core::keystore::{KeyStore, SystemStore};
 use sqs_core::paths::{self, GameFolder};
@@ -234,6 +234,8 @@ struct Unpaired {
     name: Option<String>,
     /// A code is in the inbox for Sterling to hand over in game.
     offered: bool,
+    /// "yes", "no" or "unknown": whether their Sterling said in game that they have the app.
+    app: &'static str,
 }
 
 #[derive(Serialize, Clone)]
@@ -325,6 +327,11 @@ fn build_status(st: &AppState) -> Status {
                     guid: p.guid.clone(),
                     name: p.name.clone(),
                     offered: sess.state.offers.get(&guid).is_some_and(|m| m.contains_key(&p.guid)),
+                    app: match p.app {
+                        PartnerApp::Has(_) => "yes",
+                        PartnerApp::No => "no",
+                        PartnerApp::Unknown => "unknown",
+                    },
                 })
                 .collect();
             characters.push(CharStatus {
