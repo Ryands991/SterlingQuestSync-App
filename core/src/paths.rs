@@ -18,6 +18,8 @@ pub struct GameFolder {
     pub flavour: String,
     pub has_sterling: bool,
     pub has_companion: bool,
+    /// Installed Sterling version, from its TOC.
+    pub sterling_version: Option<String>,
     /// WTF account folder names. Shown only in this PC's UI, never uploaded or logged.
     pub accounts: Vec<String>,
 }
@@ -37,6 +39,7 @@ pub fn inspect(p: &Path) -> Option<GameFolder> {
         flavour: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         has_sterling: addons.join("Sterling").join("Sterling.toc").is_file() || addons.join("Sterling").is_dir(),
         has_companion: addons.join("SterlingQuestSync").is_dir(),
+        sterling_version: crate::updater::installed_version(p),
         accounts: wtf_accounts(p),
     })
 }

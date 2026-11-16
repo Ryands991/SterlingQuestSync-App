@@ -23,13 +23,15 @@
 
     <section class="step" id="step-folder">
       <div class="eyebrow">STEP 1 OF 3</div>
-      <h1>Find your game</h1>
-      <p class="muted">Pick the WoW Forever folder, the one with Interface and WTF inside.</p>
-      <div class="choices" id="games"></div>
+      <h1>Your game folder</h1>
+      <div class="pathbox"><div class="p" id="cand-path">Looking for WoW...</div><button type="button" class="btn" id="cand-change">Change...</button></div>
+      <div class="status" id="cand-status"></div>
+      <label class="check" id="cand-install-row" hidden><input type="checkbox" id="cand-install" checked>Install Sterling Quest Tracker here too</label>
       <div class="warn small-warn" id="game-warn" hidden><span class="dot bad"></span><div><div class="bad-t">Made for WoW Forever</div><div class="small">Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.</div></div></div>
-      <p class="small muted">Not listed? <a href="#" id="pick">Pick a different folder</a>.</p>
-      <p class="small muted">The app only adds a small SterlingQuestSync add-on folder. It never writes to WTF or any other add-on.</p>
-      <div class="row end"><button type="button" class="btn primary" id="folder-go">Continue</button></div>
+      <p class="small muted" id="cand-others" hidden></p>
+      <div class="otherlist" id="cand-list" hidden></div>
+      <p class="small muted">The app only adds a small SterlingQuestSync add-on folder (and Sterling, if you tick the box). It never writes to WTF or any other add-on.</p>
+      <div class="row end"><button type="button" class="btn primary" id="folder-go" disabled>Continue</button></div>
     </section>
 
     <section class="step" id="step-first" hidden>

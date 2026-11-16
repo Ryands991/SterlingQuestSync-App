@@ -147,3 +147,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .toast.bad { border-color: var(--bad-line); background: var(--bad-bg); color: #f2b1a2; }
 .small-warn { padding: 10px 14px; gap: 10px; }
 .small-warn .dot { margin-top: 7px; width: 8px; height: 8px; }
+.pathbox { display: flex; gap: 8px; align-items: stretch; }
+.pathbox .p { flex: 1; display: flex; align-items: center; min-height: 42px; padding: 0 12px; background: var(--well); border: 1px solid var(--brass); border-radius: 3px; font: 13px Consolas, monospace; color: var(--text); word-break: break-all; }
+.status { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.status div { display: flex; gap: 8px; align-items: baseline; }
+.otherlist { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; background: var(--card); }
+.otherlist button { display: flex; justify-content: space-between; gap: 12px; text-align: left; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line2); background: transparent; color: var(--text); font: 13px Consolas, monospace; cursor: pointer; }
+.otherlist button:last-child { border-bottom: 0; }
+.otherlist button:hover { background: #4d3e31; }
+.otherlist .pill { font: 600 11px "Source Sans 3", sans-serif; letter-spacing: .8px; color: var(--muted); white-space: nowrap; }

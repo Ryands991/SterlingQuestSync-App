@@ -124,36 +124,47 @@ function renderSetup() {
   showStep(setupStep);
 }
 
+const FLAVOURS = { _forever_: "WoW Forever", _classic_era_: "WoW Classic Era", _classic_: "WoW Classic", _anniversary_: "WoW Anniversary", _retail_: "WoW Retail", _ptr_: "WoW test realm", _beta_: "WoW beta" };
+let found = [];
+function statusLine(dotCls, text) { const d = el("div"); d.append(el("span", "dot " + dotCls), el("span", "", text)); return d; }
+
+function showCandidate(g) {
+  $("cand-path").textContent = g.path;
+  const st = $("cand-status"); st.replaceChildren();
+  const forever = g.flavour === "_forever_";
+  st.append(statusLine(forever ? "good" : "bad", FLAVOURS[g.flavour] || "Game folder: " + g.flavour));
+  st.append(g.sterling_version ? statusLine("good", "Sterling " + g.sterling_version + " installed") : statusLine("", "Sterling isn't installed here"));
+  const n = g.accounts.length;
+  st.append(n ? statusLine("good", n + (n === 1 ? " WoW account found" : " WoW accounts found")) : statusLine("", "No WoW accounts yet. That's fine, log in once later."));
+  $("cand-install-row").hidden = !!g.sterling_version;
+  $("game-warn").hidden = forever;
+  $("folder-go").disabled = false;
+}
+
 async function loadGames() {
   gamesLoaded = true;
-  const box = $("games"); box.replaceChildren(el("div", "small muted", "Looking for WoW..."));
-  let games = [];
-  try { games = await call("discover_games"); } catch (e) { fail(e); }
-  box.replaceChildren();
-  if (!games.length) box.append(el("div", "dashed", "Couldn't find WoW on its own. Pick the folder below."));
-  // WoW Forever is sorted first, so it starts selected. Any other one can be picked instead.
-  games.forEach((g, i) => {
-    const l = el("label", "choice game" + (i === 0 ? " framed" : ""));
-    const r = el("input"); r.type = "radio"; r.name = "game"; r.value = String(i); r.checked = i === 0;
-    r.onchange = () => {
-      for (const x of box.querySelectorAll(".choice")) x.classList.toggle("framed", x.querySelector("input").checked);
-      $("game-warn").hidden = g.flavour === "_forever_";
-      if (!$("game-warn").hidden) $("game-warn").scrollIntoView({ block: "nearest", behavior: "smooth" });
-    };
-    const t = el("span");
-    const label = g.flavour === "_forever_" ? "WoW Forever (_forever_)" : g.flavour;
-    t.append(el("span", "ct", label), el("span", "cd", g.has_sterling ? "Sterling found here" : "No Sterling here"));
-    l.append(r, t);
-    if (i > 0) l.hidden = true; // other game versions stay tucked away until asked for
-    box.append(l);
-  });
-  if (games.length > 1) {
-    const more = el("a", "small", "Show other game folders (" + (games.length - 1) + ")"); more.href = "#";
-    more.onclick = (e) => { e.preventDefault(); for (const x of box.querySelectorAll(".choice")) x.hidden = false; more.remove(); };
-    box.append(more);
+  try { found = await call("discover_games"); } catch (e) { fail(e); found = []; }
+  if (!found.length) {
+    $("cand-path").textContent = "Couldn't find WoW on its own. Click Change to pick the folder.";
+    $("folder-go").disabled = true;
+  } else {
+    showCandidate(await call("candidate_found", { index: 0 }));
   }
-  $("folder-go").disabled = !games.length;
-  $("game-warn").hidden = !games.length || games[0].flavour === "_forever_";
+  const others = found.length - 1;
+  $("cand-others").hidden = others < 1;
+  $("cand-others").replaceChildren();
+  if (others > 0) {
+    const a = el("a", "", "Use one of those"); a.href = "#";
+    a.onclick = (e) => { e.preventDefault(); $("cand-list").hidden = !$("cand-list").hidden; };
+    $("cand-others").append("Found " + others + " other WoW " + (others === 1 ? "version" : "versions") + " on this PC. ", a);
+  }
+  const list = $("cand-list"); list.replaceChildren();
+  found.forEach((g, i) => {
+    const b = el("button"); b.type = "button";
+    b.append(el("span", "", g.path), el("span", "pill", (FLAVOURS[g.flavour] || g.flavour) + (g.sterling_version ? " · Sterling" : "")));
+    b.onclick = () => busy(null, async () => { showCandidate(await call("candidate_found", { index: i })); list.hidden = true; });
+    list.append(b);
+  });
 }
 
 function renderApp() {
@@ -212,9 +223,14 @@ function renderHome(c) {
 
   const card = $("sterling-card");
   const v = S.sterling_version, l = S.sterling_latest;
-  if (v && l && newer(l, v)) {
+  if (!v && S.game) {
     card.hidden = false;
-    const t = $("sterling-text"); t.replaceChildren(el("b", "", "Sterling "), el("span", "muted", v + " to "), el("b", "good-t", l));
+    $("sterling-text").replaceChildren(el("b", "", "Sterling Quest Tracker "), el("span", "muted", "isn't installed in this game folder"));
+    $("sterling-update").textContent = "Install";
+  } else if (v && l && newer(l, v)) {
+    card.hidden = false;
+    $("sterling-text").replaceChildren(el("b", "", "Sterling "), el("span", "muted", v + " to "), el("b", "good-t", l));
+    $("sterling-update").textContent = "Update";
   } else card.hidden = true;
 
   const hp = $("h-partners"); hp.replaceChildren();
@@ -394,12 +410,13 @@ async function warnIfNotForever(g) {
     await dialog("Made for WoW Forever", [para("You picked " + g.flavour + ". Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
   }
 }
-$("pick").onclick = (e) => { e.preventDefault(); busy(null, async () => { const g = await call("pick_game_folder"); setupStep = "first"; await warnIfNotForever(g); }); };
-$("folder-go").onclick = () => {
-  const r = document.querySelector("input[name=game]:checked");
-  if (!r) return fail("Pick a game folder first.");
-  busy($("folder-go"), async () => { await call("use_found_game", { index: Number(r.value) }); setupStep = "first"; });
-};
+$("cand-change").onclick = () => busy($("cand-change"), async () => { const g = await call("candidate_pick"); if (g) showCandidate(g); });
+$("folder-go").onclick = () => busy($("folder-go"), async () => {
+  const install = !$("cand-install-row").hidden && $("cand-install").checked;
+  if (install) $("folder-go").textContent = "Installing Sterling...";
+  try { await call("confirm_game", { installSterling: install }); } finally { $("folder-go").textContent = "Continue"; }
+  setupStep = "first";
+});
 $("to-recover").onclick = (e) => { e.preventDefault(); setupStep = "recover"; render(S); };
 $("first-go").onclick = () => {
   const yes = document.querySelector("input[name=first]:checked").value === "yes";
@@ -426,7 +443,7 @@ $("app-update").onclick = async () => {
 };
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);
-$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? ". /reload in game." : "")); });
+$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? ". /reload in game (restart if it's new)." : "")); });
 
 $("gen").onclick = () => makeCode($("gen"));
 $("gen2").onclick = () => makeCode($("gen2"));

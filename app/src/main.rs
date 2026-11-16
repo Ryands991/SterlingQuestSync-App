@@ -127,6 +127,8 @@ struct Inner {
     app_update: Option<String>,
     sterling_checked: Option<Instant>,
     busy: bool,
+    /// Folder shown in setup step 1, not used until Continue.
+    candidate: Option<PathBuf>,
 }
 
 struct AppState {
@@ -377,6 +379,39 @@ fn use_found_game(app: AppHandle, st: State<'_, AppState>, index: usize) -> Resu
     let found = paths::discover();
     let g = found.get(index).ok_or("That folder isn't in the list any more.")?;
     set_game(&app, &st, g.path.clone())
+}
+
+/// Setup step 1: show a found folder without using it yet.
+#[tauri::command(async)]
+fn candidate_found(st: State<'_, AppState>, index: usize) -> Result<GameFolder, String> {
+    let found = paths::discover();
+    let g = found.get(index).ok_or("That folder isn't in the list any more.")?;
+    st.inner.lock().unwrap().candidate = Some(g.path.clone());
+    Ok(g.clone())
+}
+
+/// Setup step 1: "Change..." opens a folder picker; the folder is shown, not used yet.
+#[tauri::command(async)]
+fn candidate_pick(app: AppHandle, st: State<'_, AppState>) -> Result<Option<GameFolder>, String> {
+    let Some(picked) = app.dialog().file().set_title("Pick your WoW game folder (the one with Interface and WTF)").blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let p = picked.into_path().map_err(|e| e.to_string())?;
+    let g = paths::normalise_pick(&p).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
+    let info = paths::inspect(&g).ok_or("That folder doesn't look like a WoW game folder.")?;
+    st.inner.lock().unwrap().candidate = Some(g);
+    Ok(Some(info))
+}
+
+/// Setup step 1 Continue: use the shown folder, and install Sterling there if asked.
+#[tauri::command(async)]
+fn confirm_game(app: AppHandle, st: State<'_, AppState>, install_sterling: bool) -> Result<(), String> {
+    let c = st.inner.lock().unwrap().candidate.clone().ok_or("Pick a game folder first.")?;
+    set_game(&app, &st, c)?;
+    if install_sterling {
+        install_sterling_now(&app).map_err(|e| format!("Your folder is set, but Sterling couldn't be installed: {e}. You can try again from Home."))?;
+    }
+    Ok(())
 }
 
 /// Opens a folder picker on the Rust side; the page never sends a path.
@@ -721,6 +756,10 @@ fn check_sterling_quiet(app: &AppHandle) -> Option<String> {
     Some(rel.version)
 }
 
+fn install_sterling_now(app: &AppHandle) -> Result<String, String> {
+    install_sterling(app)
+}
+
 fn install_sterling(app: &AppHandle) -> Result<String, String> {
     let st = app.state::<AppState>();
     let rel = updater::latest_release().map_err(msg)?;
@@ -728,13 +767,12 @@ fn install_sterling(app: &AppHandle) -> Result<String, String> {
     {
         let mut inner = st.inner.lock().unwrap();
         let sess = inner.session.as_ref().ok_or("Pick your game folder first.")?;
+        let fresh = updater::installed_version(sess.fs.game()).is_none();
         updater::install(&sess.fs, &bytes, &rel.version).map_err(msg)?;
         inner.sterling_latest = Some(rel.version.clone());
         let running = inner.game_running;
-        inner.log(
-            format!("Updated Sterling to {}.{}", rel.version, if running { " Type /reload in game to load it." } else { "" }),
-            "good",
-        );
+        let hint = if running && fresh { " Restart the game to load it." } else if running { " Type /reload in game to load it." } else { "" };
+        inner.log(format!("{} Sterling {}.{}", if fresh { "Installed" } else { "Updated to" }, rel.version, hint), "good");
     }
     emit_status(app);
     Ok(rel.version)
@@ -949,6 +987,7 @@ fn main() {
             app_update: None,
             sterling_checked: None,
             busy: false,
+            candidate: None,
         }),
         keys: Arc::new(SystemStore),
         rewatch: Mutex::new(None),
@@ -994,6 +1033,9 @@ fn main() {
             discover_games,
             use_found_game,
             pick_game_folder,
+            candidate_found,
+            candidate_pick,
+            confirm_game,
             create_account,
             link_this_pc,
             recover_account,
