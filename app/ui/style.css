@@ -87,7 +87,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .choice.game .ct { font-size: 17px; }
 .fields { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
 .coderow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px; }
-.bigcode { font: 600 26px var(--title); letter-spacing: 3px; color: var(--text); user-select: all; }
+.bigcode { font: 600 clamp(19px, 2.6vw, 26px) var(--title); letter-spacing: clamp(1px, 0.3vw, 3px); white-space: nowrap; color: var(--text); user-select: all; }
 .notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 14px; }
 .warn { display: flex; gap: 14px; padding: 16px 18px; background: var(--bad-bg); border: 1px solid var(--bad-line); border-radius: 4px; }
 .warn .dot { margin-top: 12px; width: 10px; height: 10px; }
