@@ -1,0 +1,66 @@
+name: Report abuse
+description: Someone is misusing Sterling Quest Sync, for example sending you data you didn't agree to or misusing a pairing code.
+title: "Abuse report: "
+labels: ["abuse"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for letting us know. Reports are read by the owner of the sync server, who can block an account.
+
+        **This page is public.** Anyone can read what you write here, so please:
+        - Don't post recovery codes, pairing codes or link codes.
+        - Don't post your real name, email or anything else personal.
+        - Character names and realms are fine. They're what we need to find the account.
+
+        Found a security bug instead? Please use **Report a security problem** on the previous page so it stays private.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What's happening?
+      options:
+        - Someone I don't know is syncing with me
+        - A pairing code I gave out was used by the wrong person
+        - Someone is pretending to be a friend's character
+        - Offensive character name or spam
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: their-character
+    attributes:
+      label: Their character
+      description: Name and realm, as the app or Sterling shows it.
+      placeholder: "Brannoc Ashvale, CAMWOW US2 Realm 2 PvP"
+    validations:
+      required: true
+  - type: input
+    id: your-character
+    attributes:
+      label: Your character (optional)
+      description: Helps find the pairing between you. Leave it out if you'd rather not say.
+      placeholder: "Kaelith Emberfall, CAMWOW US2 Realm 2 PvP"
+  - type: input
+    id: when
+    attributes:
+      label: When did it start?
+      placeholder: "Nov 15, around 8 PM Pacific"
+  - type: textarea
+    id: details
+    attributes:
+      label: What happened?
+      description: A few lines is plenty. A screenshot of the app's Partners or Activity page helps, as long as no codes are showing.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Anything you already did? (optional)
+      description: For example "Stopped syncing with them in Partners" or "Removed them in Sterling".
+  - type: checkboxes
+    id: safe
+    attributes:
+      label: Before you send
+      options:
+        - label: I didn't include any recovery, pairing or link codes, or anything personal.
+          required: true
