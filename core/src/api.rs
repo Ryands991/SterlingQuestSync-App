@@ -27,10 +27,15 @@ pub fn valid_key(k: &str) -> bool {
 /// Only https, except a local test server.
 pub fn check_server_url(u: &str) -> Result<String> {
     let u = u.trim().trim_end_matches('/');
-    let ok = u.starts_with("https://")
-        || u.starts_with("http://127.0.0.1")
-        || u.starts_with("http://localhost");
-    let host_ok = u.split("://").nth(1).map(|h| !h.is_empty() && !h.contains(['@', ' ', '?', '#'])).unwrap_or(false);
+    let (scheme, rest) = u.split_once("://").unwrap_or(("", ""));
+    let host_port = rest.split('/').next().unwrap_or("");
+    let host = host_port.rsplit_once(':').filter(|(_, p)| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())).map(|(h, _)| h).unwrap_or(host_port);
+    // Plain http only for a test server on this very PC. The host must match exactly:
+    // "http://127.0.0.1.example.com" is somebody else's server and would send the key unencrypted.
+    let ok = scheme == "https" || (scheme == "http" && (host == "127.0.0.1" || host == "localhost"));
+    let host_ok = !host.is_empty()
+        && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        && !rest.contains(['@', ' ', '?', '#', '\\']);
     if !ok || !host_ok {
         return Err(Error::Refused("the server address must start with https://".into()));
     }
@@ -200,6 +205,7 @@ pub fn explain(code: &str) -> &'static str {
         "invite_required" => "This server needs an invite code to join.",
         "not_paired" => "You're no longer paired with that character.",
         "signups_open" => "Sign-up is open, so invites aren't needed.",
+        "daily_limit" => "This account has uploaded as much as the server allows in one day. It will sync again tomorrow.",
         _ => "The server couldn't do that right now.",
     }
 }
@@ -403,6 +409,13 @@ mod tests {
         assert!(check_server_url("https://user@evil.com").is_err());
         assert!(check_server_url("ftp://x").is_err());
         assert!(check_server_url("http://127.0.0.1:8787").is_ok());
+        assert!(check_server_url("http://localhost:8787").is_ok());
+        // Audit: look-alike hosts must not get plain http.
+        assert!(check_server_url("http://127.0.0.1.evil.example").is_err());
+        assert!(check_server_url("http://localhost.evil.example:8787").is_err());
+        assert!(check_server_url("http://127.0.0.1@evil.example").is_err());
+        assert!(check_server_url("https://evil.example\\@sync.sterlingaddons.com").is_err());
+        assert!(check_server_url("https://").is_err());
     }
 
     #[test]

@@ -31,6 +31,7 @@ use sqs_core::{companion, updater, Error};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_ACTIVITY: usize = 200;
 const STERLING_CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
+const MAX_OUTBOX_BYTES: u64 = 16 * 1024 * 1024;
 
 // Companion add-on files, bundled at build time. Inbox.lua is never bundled.
 const COMPANION_FILES: &[(&str, &[u8])] = &[
@@ -187,7 +188,13 @@ fn read_outboxes(fs_: &SafeFs) -> (Vec<Outbox>, Vec<String>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
     for acct in paths::wtf_accounts(fs_.game()) {
-        if let Ok(t) = fs::read_to_string(paths::outbox_file(fs_.game(), &acct)) {
+        let file = paths::outbox_file(fs_.game(), &acct);
+        // A real outbox is well under a megabyte per character; never load something huge.
+        if fs::metadata(&file).is_ok_and(|m| m.len() > MAX_OUTBOX_BYTES) {
+            problems.push("outbox file too large".into());
+            continue;
+        }
+        if let Ok(t) = fs::read_to_string(&file) {
             match parse_outbox(&t) {
                 Ok(o) => out.push(o),
                 Err(e) => problems.push(e.to_string()),

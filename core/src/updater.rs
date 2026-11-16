@@ -155,6 +155,18 @@ fn entry_path(name: &str, enclosed: Option<PathBuf>) -> Result<Option<PathBuf>> 
                 if !RE_FILE.is_match(&s) || s.starts_with('.') && s != ".pkgmeta" {
                     return bad();
                 }
+                // Windows quietly drops a trailing dot or space, and treats some names as devices.
+                let lower = s.to_ascii_lowercase();
+                let stem = lower.split('.').next().unwrap_or("");
+                let device = matches!(stem, "con" | "prn" | "aux" | "nul")
+                    || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && stem.as_bytes()[3].is_ascii_digit());
+                // An add-on is data and Lua. Nothing a double-click could run belongs in it.
+                let runnable = [".exe", ".dll", ".bat", ".cmd", ".com", ".scr", ".msi", ".ps1", ".vbs", ".js", ".jse", ".wsf", ".hta", ".lnk", ".url", ".jar", ".reg"]
+                    .iter()
+                    .any(|e| lower.ends_with(e));
+                if s.ends_with('.') || s.ends_with(' ') || device || runnable {
+                    return bad();
+                }
                 parts.push(s.into_owned());
             }
             _ => return bad(),
@@ -318,6 +330,14 @@ mod tests {
             make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling\\..\\..\\WTF\\x.lua", b"pwned")]),
             make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/C:/x", b"pwned")]),
             make_zip(&[("Sterling/Main.lua", b"no toc")]),
+            // Audit: names Windows treats specially, and anything a double-click could run.
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/Sterling.toc.", b"shadow")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/Core.lua ", b"shadow")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/NUL", b"device")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/com1.lua", b"device")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/Readme.EXE", b"MZ")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/Media/open me.lnk", b"L")]),
+            make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/fix.ps1", b"x")]),
             b"not a zip".to_vec(),
         ];
         for z in cases {
