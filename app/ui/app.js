@@ -210,7 +210,9 @@ function renderHome(c) {
   const dot = $("h-dot");
   steps(null);
   // No character chosen: Home shows only what to do next.
-  $("home-rest").hidden = !c;
+  const needSterling = !!S.game && !S.sterling_version;
+  $("home-rest").hidden = !c && !needSterling;
+  document.querySelector("#home-rest .grid").hidden = !c;
   $("hero-act").hidden = !c;
   $("h-last").hidden = !c;
   if (!c && S.characters.length) {
@@ -222,11 +224,11 @@ function renderHome(c) {
     $("h-char").textContent = "WELCOME";
     dot.className = "dot";
     if (!S.companion_installed) {
-      $("h-title").textContent = "Add-on missing";
-      $("h-line").textContent = "The SterlingQuestSync add-on isn't in your AddOns folder. Pick your game folder again in Settings.";
+      $("h-title").textContent = "Helper add-on missing";
+      $("h-line").textContent = "The app's helper add-on (Sterling Quest Sync) isn't in your AddOns folder. In Settings, pick your game folder again to put it back, then restart WoW.";
     } else if (!S.sterling_version) {
       $("h-title").textContent = "Sterling isn't installed";
-      $("h-line").textContent = "Install Sterling Quest Tracker in this game folder. Your characters show up here once Sterling has something to share.";
+      $("h-line").textContent = "This app works with the Sterling Quest Tracker add-on. Click Install below, then restart WoW and log in.";
     } else if (S.restart_game && S.game_running) {
       $("h-title").textContent = "Restart WoW";
       dot.className = "dot gold";
@@ -250,8 +252,8 @@ function renderHome(c) {
     $("h-char").textContent = c.name.toUpperCase();
     if (S.busy) { $("h-title").textContent = "Syncing..."; dot.className = "dot gold"; $("h-line").textContent = "Talking to the server."; }
     else if (S.last_error) { $("h-title").textContent = "Couldn't sync"; dot.className = "dot bad"; $("h-line").textContent = S.last_error; }
-    else if (c.ready) { $("h-title").textContent = "Ready to sync"; dot.className = "dot gold"; $("h-line").textContent = "New save found. Saved " + ago(c.saved) + (S.auto_sync ? ". Syncing on its own." : "."); }
-    else { $("h-title").textContent = "Up to date"; dot.className = "dot good"; $("h-line").textContent = c.saved ? "Nothing new since your last save, " + ago(c.saved) + "." : "Waiting for a save from this PC."; }
+    else if (c.ready) { $("h-title").textContent = "Ready to sync"; dot.className = "dot gold"; $("h-line").textContent = "New progress from " + ago(c.saved) + (S.auto_sync ? ". Sharing it on its own." : ". Click Sync now to share it."); }
+    else { $("h-title").textContent = "Up to date"; dot.className = "dot good"; $("h-line").textContent = c.saved ? "Your partners have your latest progress (saved " + ago(c.saved) + ")." : "Play with Sterling on, then /reload or log out to share your progress."; }
   }
   $("h-last").textContent = S.last_sync ? "Last synced " + ago(S.last_sync) : "Not synced yet";
 
@@ -265,7 +267,7 @@ function renderHome(c) {
     $("app-update").hidden = true;
   } else if (av) {
     ac.hidden = false;
-    $("app-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
+    $("app-text").replaceChildren(el("span", "muted", "App update: "), el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
     $("app-update").hidden = false; // the install finds and checks the signed update itself
   } else ac.hidden = true;
 
@@ -277,7 +279,7 @@ function renderHome(c) {
     $("sterling-update").textContent = "Install";
   } else if (v && l && newer(l, v)) {
     card.hidden = false;
-    $("sterling-text").replaceChildren(el("b", "", "Sterling "), el("span", "muted", v + " to "), el("b", "good-t", l));
+    $("sterling-text").replaceChildren(el("span", "muted", "Add-on update: "), el("b", "", "Sterling "), el("span", "muted", v + " to "), el("b", "good-t", l));
     $("sterling-update").textContent = "Update";
   } else card.hidden = true;
 
@@ -286,7 +288,7 @@ function renderHome(c) {
   const all = c ? partnerRows(c) : [];
   const favs = all.filter((r) => r.fav);
   if (!all.length) {
-    hp.append(el("div", "empty", c ? "No partners yet." : "Select a character to start."));
+    hp.append(el("div", "empty", c ? "No partners yet. Partners you add in Sterling show up here." : "Select a character to start."));
     if (c) { const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); hp.append(b); }
   } else {
     const box = el("div", "plist flat");
@@ -383,10 +385,10 @@ function partnerRows(c) {
     } });
   }
   for (const u of c.unpaired) {
-    const [status, cls] = u.offered ? ["Pairing on its own", "s-wait"]
-      : u.app === "yes" ? ["Has the app, not paired", "s-wait"]
+    const [status, cls] = u.offered ? ["Pairs when you're both next online", "s-wait"]
+      : u.app === "yes" ? ["Has the app, pairs when you're both next online", "s-wait"]
       : u.app === "no" ? ["Doesn't have the app yet", "s-bad"]
-      : ["Not seen yet", ""];
+      : ["Not online with you yet", ""];
     rows.push({ guid: u.guid, opts: {
       name: u.name, look: u.look, status, statusCls: cls, star: star(u.guid), right: [null, lastTime(u.look && u.look.seen)],
       menu: async () => {
@@ -397,7 +399,7 @@ function partnerRows(c) {
   }
   for (const p of list.filter((p) => !p.active)) {
     const replaced = p.ended_reason === "replaced";
-    const why = replaced ? "Missing key, resync" : p.ended_reason === "deleted" ? "Account deleted" : "Stopped syncing";
+    const why = replaced ? "Needs pairing again" : p.ended_reason === "deleted" ? "They deleted their data" : "Stopped syncing";
     rows.push({ guid: p.guid, opts: {
       name: p.name, look: p.look, dim: !replaced,
       status: why, statusCls: replaced ? "s-bad" : "",
@@ -417,7 +419,7 @@ function partnerRows(c) {
 }
 
 function renderPartners(c) {
-  $("p-note").textContent = (S.game_running ? "Changes here reach the game when you /reload." : "Changes here reach the game next time you log in.") + " Changes made in game show up here after the game saves. If both happen in one session, removing wins.";
+  $("p-note").textContent = "Stars and removals you make here reach the game " + (S.game_running ? "when you /reload." : "next time you log in.") + " Ones you make in game show up here after the game saves. If you change the same partner in both places, removing wins.";
   $("p-sub").replaceChildren();
   const you = $("p-you"); you.replaceChildren();
   const body = $("p-rows"); body.replaceChildren();
@@ -426,7 +428,7 @@ function renderPartners(c) {
   if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
   const linked = c.partners.filter((p) => p.active).length;
   const inSterling = c.unpaired.length + linked;
-  $("p-sub").append(inSterling ? linked + " of " + inSterling + " syncing through the app. Star up to 5 favourites; they stay on top here, on Home and in game." : "Syncing with nobody yet.");
+  $("p-sub").append(inSterling ? linked + " of " + inSterling + " Sterling partners also sync through the app. Star up to 5 favourites to keep them on top, here and in game." : "No partners yet. Add partners in Sterling in game, or pair a friend here with a code.");
 
   const look = c.look || {};
   const race = [look.race, CLASS_NAMES[look.class]].filter(Boolean).join(" ");
@@ -438,7 +440,7 @@ function renderPartners(c) {
   }));
 
   const rows = partnerRows(c);
-  if (!rows.length) body.append(el("div", "empty", "No partners yet. Pair a friend to start."));
+  if (!rows.length) body.append(el("div", "empty", "No partners yet. Partners you add in Sterling show up here, or pair a friend with a code."));
   for (const r of rows) body.append(prow(r.opts));
 }
 
@@ -520,7 +522,7 @@ function renderSettings() {
   $("s-appver").textContent = S.version;
   renderAppUpdateSettings();
   $("s-tray").checked = S.close_to_tray;
-  $("s-sterling").textContent = S.sterling_version ? "Installed " + S.sterling_version + ". Your old copy is kept as a backup." : "Sterling isn't installed in this game folder.";
+  $("s-sterling").textContent = S.sterling_version ? "You have " + S.sterling_version + ". Updates install for you, and the old version is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
   if (!pcsLoaded) loadPcs();
 }
@@ -545,7 +547,7 @@ for (const r of document.querySelectorAll("input[name=first]")) r.addEventListen
 const OTHER_WOW = ["_classic_era_", "_classic_", "_anniversary_", "_retail_", "_ptr_", "_beta_", "_classic_ptr_", "_xptr_"];
 async function warnIfNotForever(g) {
   if (g && OTHER_WOW.includes(g.flavour)) {
-    await dialog("Made for WoW Forever", [para("You picked " + g.flavour + ". Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
+    await dialog("Made for WoW Forever", [para("You picked " + (FLAVOURS[g.flavour] || g.flavour) + ". Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
   }
 }
 $("cand-change").onclick = () => busy($("cand-change"), async () => { const g = await call("candidate_pick"); if (g) showCandidate(g); });

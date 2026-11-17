@@ -525,7 +525,7 @@ pub fn companion_toc() -> String {
     [
         "## Interface: 16001, 11509",
         "## Title: Sterling Quest Sync",
-        "## Notes: Data from the Sterling Quest Sync app. Leave enabled.",
+        "## Notes: Lets Sterling and the Sterling Quest Sync app share quest progress. Keep this enabled.",
         "## Author: SterlingAddons",
         "## IconTexture: Interface\\AddOns\\SterlingQuestSync\\icon",
         "## Version: 1",

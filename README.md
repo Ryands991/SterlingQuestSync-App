@@ -11,9 +11,9 @@
 
 ## What it does
 
-[Sterling Quest Tracker](https://github.com/SterlingAddons/SterlingQuest) already syncs quests live with friends who are online at the same time. This small desktop app covers the rest: when your play times don't overlap, it uploads your latest copy when you log off, and your friend's app has it waiting before they log in.
+[Sterling Quest Tracker](https://github.com/SterlingAddons/SterlingQuest) already syncs quests live with friends who are online at the same time. This small desktop app covers the rest: when your play times don't overlap, it shares your progress each time the game saves (when you log out or `/reload`), and your friend's app has it waiting before they log in.
 
-- **Syncs on its own.** It notices when the game saves, uploads, and writes what your friends sent into a small add-on. `/reload` or log in to see it.
+- **Syncs on its own.** It notices when the game saves, shares your progress, and hands your friends' progress to Sterling through a small helper add-on. You see it the next time you log in or `/reload`.
 - **Pairs on its own.** Friends who are already Sterling partners pair in the app by themselves the next time you're both online. No codes to type.
 - **Or pair with a code.** One of you makes a code, the other types it in. Nobody can find you or send you a request.
 - **Favourites.** Star up to 5 partners. They stay on top in the app and in game, and starring in one shows up in the other.
@@ -42,6 +42,18 @@ The app updates itself after that (it asks first, unless you turn on automatic u
   <img src="docs/screenshots/setup.png" width="49%" alt="Setup: your game folder, found automatically">
   <img src="docs/screenshots/pair.png" width="49%" alt="Pair a friend: give a code or type one in">
 </p>
+
+## What the partner statuses mean
+
+| Status | What it means |
+|---|---|
+| **Up to date** (green) | You have their latest progress, and it's in your game. |
+| **New copy, /reload to see it** (gold) | Their latest progress arrived. Type `/reload` (or log in) to see it in game. |
+| **Paired. Waiting for their next save** | You're paired. Their progress arrives after they next log out or `/reload`. |
+| **Pairs when you're both next online** (gold) | They have the app. The apps pair on their own the next time you're both in game. |
+| **Doesn't have the app yet** (red) | You still sync live in game when you're both online. Offline syncing starts once they install the app. |
+| **Not online with you yet** | The app hasn't heard about them yet. That happens the next time you're both in game. |
+| **Needs pairing again** (red) | They reinstalled or paired from somewhere else. Pair again with a new code. |
 
 ## Troubleshooting
 
@@ -73,7 +85,7 @@ Hard-coded, not settings, and covered by tests that run on Windows with every bu
 - It writes only to its own add-on folder (`Interface\AddOns\SterlingQuestSync`), to `Interface\AddOns\Sterling` during a Sterling update, and to its own data folder.
 - **The game's `WTF` folder is read-only.** The app reads one small save file there and copies Sterling's saves into its own backups. It never writes, moves or deletes anything in WTF, even through links, junctions, short names or odd spellings.
 - It never touches any other add-on. An old Sterling is moved aside on update, never deleted.
-- The in-game inbox is built from a fixed template, and every value is checked before it's written, so nothing from the server can run as code in your game.
+- The file the app gives the game (`Inbox.lua`, in its helper add-on) is built from a fixed template, and every value is checked before it's written, so nothing from the server can run as code in your game.
 
 ## Privacy
 

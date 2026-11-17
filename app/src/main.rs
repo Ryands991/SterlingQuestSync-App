@@ -459,7 +459,15 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
         inner.settings.game = Some(g);
         save_json("settings.json", &inner.settings)?;
         inner.session = Some(sess);
-        inner.log(format!("Using the {} game folder. Added the SterlingQuestSync add-on.", info.flavour), "");
+        let game = match info.flavour.as_str() {
+            "_forever_" => "WoW Forever",
+            "_classic_era_" => "WoW Classic Era",
+            "_classic_" => "WoW Classic",
+            "_anniversary_" => "WoW Anniversary",
+            "_retail_" => "WoW Retail",
+            other => other,
+        };
+        inner.log(format!("Using your {game} folder. Added the app's helper add-on (Sterling Quest Sync)."), "");
     }
     if let Some(tx) = st.rewatch.lock().unwrap().as_ref() {
         let _ = tx.send(());
@@ -614,7 +622,7 @@ fn describe(inner: &mut Inner, r: &Report) {
     let mut ups: Vec<String> = r.sent_to.iter().map(|(f, _)| name(f)).collect();
     ups.dedup();
     for u in ups {
-        inner.log(format!("Uploaded {u}'s progress"), "good");
+        inner.log(format!("Shared {u}'s progress with your partners"), "good");
     }
     for (f, t) in &r.received_from {
         if f == t {
@@ -641,7 +649,7 @@ fn describe(inner: &mut Inner, r: &Report) {
     }
     if r.inbox_written && (!r.received_from.is_empty() || !r.ended.is_empty() || r.auto_offered > 0) {
         let how = if inner.game_running { "Type /reload in game to see it." } else { "You'll see it next time you log in." };
-        inner.log(format!("Updated the inbox. {how}"), "");
+        inner.log(format!("Partners' progress is ready for the game. {how}"), "");
     }
 }
 
@@ -680,10 +688,10 @@ fn run_sync(app: &AppHandle) -> Result<Report, String> {
             }
             Err(Error::Offline) => {
                 if inner.online != Some(false) {
-                    inner.log("Can't reach the server. It will try again.", "bad");
+                    inner.log("Can't reach the sync server. Trying again soon.", "bad");
                 }
                 inner.online = Some(false);
-                inner.last_error = Some("Can't reach the server. It will try again.".into());
+                inner.last_error = Some("Can't reach the sync server. Trying again soon.".into());
             }
             Err(Error::Api { code, .. }) if code == "unknown_key" => {
                 inner.online = Some(true);
