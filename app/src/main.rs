@@ -719,6 +719,8 @@ fn run_sync(app: &AppHandle) -> Result<Report, String> {
         inner.settings.clone()
     };
     emit_status(app);
+    // Every sync also picks up the owner's notices (one small request), on top of the launch and 6-hour checks.
+    check_notices(app);
     let res = (|| {
         let client = st.client(&settings).map_err(Error::Other)?;
         let mut inner = st.inner.lock().unwrap();
