@@ -44,6 +44,28 @@ pub fn install(fs_: &SafeFs, files: &[(&str, &[u8])]) -> Result<()> {
     Ok(())
 }
 
+/// True when the game saved Sterling's data after the helper add-on was put in place, but the
+/// helper saved nothing with it. Both save at the same moment when both are loaded, so this means
+/// WoW didn't load the helper: usually the game was open when it was added (only a full restart
+/// finds new add-ons), or it's unticked in the AddOns list. Only reads files.
+pub fn helper_not_loaded(game: &Path) -> bool {
+    let mtime = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    let Some(added) = mtime(&paths::companion_dir(game).join("SterlingQuestSync.toc")) else { return false };
+    // The account whose Sterling data was saved most recently.
+    let latest = paths::wtf_accounts(game)
+        .into_iter()
+        .filter_map(|a| mtime(&paths::sterling_saved(game, &a)).map(|t| (t, a)))
+        .max_by_key(|(t, _)| *t);
+    let Some((sterling, acct)) = latest else { return false };
+    if sterling <= added + std::time::Duration::from_secs(5) {
+        return false; // the game hasn't saved since the helper was added
+    }
+    match mtime(&paths::outbox_file(game, &acct)) {
+        None => true,
+        Some(helper) => helper + std::time::Duration::from_secs(120) < sterling,
+    }
+}
+
 pub fn is_installed(fs_: &SafeFs) -> bool {
     let d = fs_.root(Root::Companion);
     d.join("SterlingQuestSync.toc").is_file() && d.join("Inbox.lua").is_file()
@@ -198,5 +220,40 @@ mod tests {
         install(&s, &[("SterlingQuestSync.toc", b"x")]).unwrap();
         let moved = move_to_trash(&s, &s.root(Root::Companion).join("SterlingQuestSync.toc")).unwrap();
         assert!(moved.is_file());
+    }
+
+    #[test]
+    fn notices_when_the_game_saved_without_the_helper() {
+        use std::time::{Duration, SystemTime};
+        let d = tempfile::tempdir().unwrap();
+        let g = d.path();
+        let sv = g.join("WTF/Account/TESTACCOUNT/SavedVariables");
+        fs::create_dir_all(&sv).unwrap();
+        fs::create_dir_all(g.join("Interface/AddOns/SterlingQuestSync")).unwrap();
+        let toc = g.join("Interface/AddOns/SterlingQuestSync/SterlingQuestSync.toc");
+        fs::write(&toc, "x").unwrap();
+        let set = |p: &Path, secs: u64| {
+            let f = fs::File::options().write(true).open(p).unwrap();
+            f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
+        };
+        set(&toc, 1_000_000);
+        // No save since the helper was added: not a problem yet.
+        assert!(!helper_not_loaded(g));
+        let sterling = sv.join("Sterling.lua");
+        fs::write(&sterling, "x").unwrap();
+        set(&sterling, 1_000_500);
+        // Sterling saved, the helper didn't: not loaded.
+        assert!(helper_not_loaded(g));
+        let helper = sv.join("SterlingQuestSync.lua");
+        fs::write(&helper, "x").unwrap();
+        set(&helper, 1_000_100);
+        // The helper's file is from an older session: still not loaded now.
+        assert!(helper_not_loaded(g));
+        set(&helper, 1_000_499);
+        // Saved together: loaded.
+        assert!(!helper_not_loaded(g));
+        // An older Sterling save from before the helper was added doesn't count.
+        set(&sterling, 999_000);
+        assert!(!helper_not_loaded(g));
     }
 }

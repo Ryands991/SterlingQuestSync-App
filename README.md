@@ -18,7 +18,9 @@
 - **Or pair with a code.** One of you makes a code, the other types it in. Nobody can find you or send you a request.
 - **Favourites.** Star up to 5 partners. They stay on top in the app and in game, and starring in one shows up in the other.
 - **Keeps Sterling up to date** if you want it to (Settings), and tells you in game when the app has an update.
-- **Stays out of the way.** Lives in the tray, works in the background at low priority.
+- **Stays out of the way.** Lives in the tray, works in the background at low priority. Can start with Windows if you turn that on in Settings (off by default).
+- **Optional notifications** when a favourite's new progress arrives (off by default).
+- **Invite friends** who don't have the app yet: their row on the Partners page has a **Copy invite** button with the download link and setup steps.
 
 Works with WoW Forever. Other WoW versions may work but aren't tested.
 
@@ -57,6 +59,8 @@ The app updates itself after that (it asks first, unless you turn on automatic u
 
 ## Troubleshooting
 
+**First, the quick way to get help:** in the app, open **Settings** and click **Copy details for help**. It copies the app's version, game folder type, add-on status and recent errors (no codes or account details). Paste it into an issue or email.
+
 **My character doesn't show up in the app**
 
 1. Exit WoW completely and start it again. The app adds a small helper add-on called Sterling Quest Sync, and WoW only finds new add-ons when the game starts. `/reload` won't do it.
@@ -78,11 +82,21 @@ That news travels in game. Be online at the same time as your friend, then `/rel
 
 The app keeps trying on its own. If it lasts more than an hour, open an issue.
 
+## Uninstalling
+
+1. If you turned on **Start with Windows**, turn it off in the app's Settings first.
+2. Windows **Settings > Apps > Installed apps**, find **Sterling Quest Sync**, and uninstall it.
+3. Optional: delete the helper add-on folder `Interface\AddOns\SterlingQuestSync` in your WoW folder.
+4. Optional: delete the app's data folder `%APPDATA%\SterlingQuestSync` (settings, backups and logs).
+5. Optional: to remove your data from the sync server too, click **Delete my data** in Settings *before* uninstalling.
+
+Sterling itself stays installed. Remove it from `Interface\AddOns\Sterling` if you want it gone too.
+
 ## What it can touch on your PC
 
 Hard-coded, not settings, and covered by tests that run on Windows with every build:
 
-- It writes only to its own add-on folder (`Interface\AddOns\SterlingQuestSync`), to `Interface\AddOns\Sterling` during a Sterling update, and to its own data folder.
+- It writes only to its own add-on folder (`Interface\AddOns\SterlingQuestSync`), to `Interface\AddOns\Sterling` during a Sterling update, and to its own data folder. If you turn on **Start with Windows**, it also adds one entry to your user's Windows startup list (removed when you turn it off).
 - **The game's `WTF` folder is read-only.** The app reads one small save file there and copies Sterling's saves into its own backups. It never writes, moves or deletes anything in WTF, even through links, junctions, short names or odd spellings.
 - It never touches any other add-on. An old Sterling is moved aside on update, never deleted.
 - The file the app gives the game (`Inbox.lua`, in its helper add-on) is built from a fixed template, and every value is checked before it's written, so nothing from the server can run as code in your game.

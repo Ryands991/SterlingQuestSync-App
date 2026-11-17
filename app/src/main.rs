@@ -70,6 +70,14 @@ struct Settings {
     restart_game: bool,
     /// Where the window was last, so it opens there again.
     window: Option<Placement>,
+    /// Off by default and never suggested: the person turns it on in Settings.
+    start_with_windows: bool,
+    /// Off by default: a Windows notification when a favourite's new progress arrives.
+    notify_favs: bool,
+    /// The one-time "still running in the tray" note was shown.
+    close_note_seen: bool,
+    /// The version whose "What's new" was last seen. None on a fresh install.
+    seen_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -95,6 +103,10 @@ impl Default for Settings {
             character: None,
             restart_game: false,
             window: None,
+            start_with_windows: false,
+            notify_favs: false,
+            close_note_seen: false,
+            seen_version: None,
         }
     }
 }
@@ -153,6 +165,8 @@ struct Inner {
     updating: Option<UpdateStep>,
     /// Folder shown in setup step 1, not used until Continue.
     candidate: Option<PathBuf>,
+    /// When the server first stopped answering. Short blips aren't shown.
+    offline_since: Option<i64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -300,6 +314,13 @@ struct Status {
     auto_update_app: bool,
     close_to_tray: bool,
     restart_game: bool,
+    start_with_windows: bool,
+    notify_favs: bool,
+    close_note_seen: bool,
+    /// WoW saved Sterling's data without the helper add-on: it isn't loaded.
+    helper_off: bool,
+    /// Notes for versions newer than the one last seen, shown once after an update.
+    whats_new: Vec<(String, Vec<String>)>,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -416,6 +437,11 @@ fn build_status(st: &AppState) -> Status {
         auto_update_app: s.auto_update_app,
         close_to_tray: s.close_to_tray,
         restart_game: s.restart_game,
+        start_with_windows: s.start_with_windows,
+        notify_favs: s.notify_favs,
+        close_note_seen: s.close_note_seen,
+        helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
+        whats_new: whats_new(s.seen_version.as_deref()),
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -653,6 +679,8 @@ fn describe(inner: &mut Inner, r: &Report) {
     }
 }
 
+const OFFLINE_GRACE_SECS: i64 = 180;
+
 fn run_sync(app: &AppHandle) -> Result<Report, String> {
     let st = app.state::<AppState>();
     let settings = {
@@ -684,27 +712,37 @@ fn run_sync(app: &AppHandle) -> Result<Report, String> {
             Ok(r) => {
                 inner.last_error = None;
                 inner.online = Some(true);
+                inner.offline_since = None;
                 describe(&mut inner, r);
             }
             Err(Error::Offline) => {
-                if inner.online != Some(false) {
-                    inner.log("Can't reach the sync server. Trying again soon.", "bad");
+                // Short blips fix themselves, so only say so after a few minutes without the server.
+                let since = *inner.offline_since.get_or_insert(now());
+                if now() - since >= OFFLINE_GRACE_SECS {
+                    if inner.online != Some(false) {
+                        inner.log("Can't reach the sync server. Trying again soon.", "bad");
+                    }
+                    inner.online = Some(false);
+                    inner.last_error = Some("Can't reach the sync server. Trying again soon.".into());
                 }
-                inner.online = Some(false);
-                inner.last_error = Some("Can't reach the sync server. Trying again soon.".into());
             }
             Err(Error::Api { code, .. }) if code == "unknown_key" => {
                 inner.online = Some(true);
+                inner.offline_since = None;
                 inner.rejoin = true;
                 inner.last_error = None;
             }
             Err(e) => {
                 inner.online = Some(true);
+                inner.offline_since = None;
                 let m = e.to_string();
                 inner.log(format!("Sync failed: {m}"), "bad");
                 inner.last_error = Some(m);
             }
         }
+    }
+    if let Ok(r) = &res {
+        notify_favourites(app, r);
     }
     emit_status(app);
     res.map_err(msg)
@@ -724,9 +762,24 @@ fn set_options(
     auto_update_app: Option<bool>,
     close_to_tray: Option<bool>,
     character: Option<String>,
+    start_with_windows: Option<bool>,
+    notify_favs: Option<bool>,
+    close_note_seen: Option<bool>,
 ) -> Result<(), String> {
+    if let Some(v) = start_with_windows {
+        set_autostart(v)?;
+    }
     {
         let mut inner = st.inner.lock().unwrap();
+        if let Some(v) = start_with_windows {
+            inner.settings.start_with_windows = v;
+        }
+        if let Some(v) = notify_favs {
+            inner.settings.notify_favs = v;
+        }
+        if let Some(v) = close_note_seen {
+            inner.settings.close_note_seen = v;
+        }
         if let Some(v) = auto_sync {
             inner.settings.auto_sync = v;
         }
@@ -1034,6 +1087,8 @@ fn open_page(which: String) -> Result<(), String> {
         "repo" => "https://github.com/SterlingAddons/SterlingQuestSync-App",
         "issues" => "https://github.com/SterlingAddons/SterlingQuestSync-App/issues",
         "privacy" => "https://github.com/SterlingAddons/SterlingQuestSync-Server#privacy",
+        "help" => "https://github.com/SterlingAddons/SterlingQuestSync-App#troubleshooting",
+        "download" => "https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest",
         _ => return Err("unknown page".into()),
     };
     #[cfg(windows)]
@@ -1173,6 +1228,128 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
+const WHATS_NEW: &[(&str, &[&str])] = &[(
+    "0.1.24",
+    &[
+        "The app notices when WoW didn't load its helper add-on and tells you how to fix it.",
+        "Invite a friend who doesn't have the app from their row on the Partners page.",
+        "New in Settings: Start with Windows, favourite notifications and Copy details for help.",
+        "The window remembers its size and spot, and hints say /reload or log in to match the game.",
+    ],
+)];
+
+fn newer_version(a: &str, b: &str) -> bool {
+    let p = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
+    p(a) > p(b)
+}
+
+/// Notes for every version after the one last seen, up to this one. Nothing on a fresh install.
+fn whats_new(seen: Option<&str>) -> Vec<(String, Vec<String>)> {
+    let Some(seen) = seen else { return Vec::new() };
+    WHATS_NEW
+        .iter()
+        .filter(|(v, _)| newer_version(v, seen) && !newer_version(v, VERSION))
+        .map(|(v, lines)| (v.to_string(), lines.iter().map(|l| l.to_string()).collect()))
+        .collect()
+}
+
+/// Adds or removes the app from Windows startup, for this Windows user only (no admin needed).
+/// It starts with --hidden, so it goes straight to the tray.
+fn set_autostart(on: bool) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let key = w("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        let name = w("SterlingQuestSync");
+        if on {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let cmd = w(&format!("\"{}\" --hidden", exe.display()));
+            let r = unsafe {
+                RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, cmd.as_ptr().cast(), (cmd.len() * 2) as u32)
+            };
+            if r != 0 {
+                return Err(format!("Couldn't add the app to Windows startup (error {r})."));
+            }
+        } else {
+            let r = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) };
+            // 2 = not there, which is what we wanted anyway.
+            if r != 0 && r != 2 {
+                return Err(format!("Couldn't remove the app from Windows startup (error {r})."));
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = on;
+        Err("Start with Windows only works on Windows.".into())
+    }
+}
+
+/// A Windows notification for each favourite whose new progress just arrived, when turned on.
+fn notify_favourites(app: &AppHandle, r: &Report) {
+    use tauri_plugin_notification::NotificationExt;
+    let lines: Vec<String> = {
+        let st = app.state::<AppState>();
+        let inner = st.inner.lock().unwrap();
+        if !inner.settings.notify_favs {
+            return;
+        }
+        let Some(sess) = inner.session.as_ref() else { return };
+        let names = inner.names();
+        r.received_from
+            .iter()
+            .filter(|(from, to)| from != to && sess.state.favs.get(to).is_some_and(|f| f.list.contains(from)))
+            .map(|(from, _)| names.get(from).cloned().unwrap_or_else(|| "A favourite".into()))
+            .collect()
+    };
+    if lines.is_empty() {
+        return;
+    }
+    let running = app.state::<AppState>().inner.lock().unwrap().game_running;
+    let how = if running { "Type /reload in game to see it." } else { "You'll see it next time you log in." };
+    let title = if lines.len() == 1 { format!("{}'s new progress arrived", lines[0]) } else { format!("New progress from {}", lines.join(", ")) };
+    let _ = app.notification().builder().title(title).body(how).show();
+}
+
+/// Plain facts for a help request. No codes, keys or account IDs.
+#[tauri::command]
+fn support_details(st: State<'_, AppState>) -> String {
+    let status = build_status(&st);
+    let inner = st.inner.lock().unwrap();
+    let crash = fs::read_to_string(app_data().join("crash.log")).unwrap_or_default();
+    let crash_tail: Vec<&str> = crash.lines().rev().take(5).collect();
+    let recent: Vec<String> = inner.activity.iter().take(8).map(|a| format!("  {} {}", a.t, a.text)).collect();
+    format!(
+        "Sterling Quest Sync {}\nWindows: {}\nGame folder: {}\nGame open: {}\nHelper add-on installed: {}\nHelper add-on loaded by WoW: {}\nSterling: {}\nCharacters: {}\nServer: {}\nLast error: {}\nRecent activity:\n{}\nCrash log (newest first):\n{}\n",
+        VERSION,
+        std::env::consts::OS,
+        status.game.as_ref().map(|g| g.flavour.as_str()).unwrap_or("not set"),
+        if status.game_running { "yes" } else { "no" },
+        if status.companion_installed { "yes" } else { "no" },
+        if status.helper_off { "NO (WoW saved without it)" } else { "yes, or not known yet" },
+        status.sterling_version.as_deref().unwrap_or("not installed"),
+        status.characters.len(),
+        match status.online { Some(true) => "online", Some(false) => "can't reach it", None => "not checked yet" },
+        status.last_error.as_deref().unwrap_or("none"),
+        if recent.is_empty() { "  none".to_string() } else { recent.join("\n") },
+        if crash_tail.is_empty() { "  none".to_string() } else { crash_tail.iter().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n") },
+    )
+}
+
+#[tauri::command]
+fn dismiss_whats_new(app: AppHandle, st: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut inner = st.inner.lock().unwrap();
+        inner.settings.seen_version = Some(VERSION.into());
+        save_json("settings.json", &inner.settings)?;
+    }
+    emit_status(&app);
+    Ok(())
+}
+
 static PLACE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Notes the window's spot after a move or resize, and saves it once things settle
@@ -1302,6 +1479,7 @@ fn main() {
             busy: false,
             updating: None,
             candidate: None,
+            offline_since: None,
         }),
         keys: Arc::new(SystemStore),
         rewatch: Mutex::new(None),
@@ -1311,6 +1489,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(state)
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
@@ -1328,9 +1507,28 @@ fn main() {
         .setup(|app| {
             // The window starts hidden so it can be put back in its old spot before anyone sees it.
             restore_placement(app.handle());
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
+            // Started by Windows at login (--hidden): stay in the tray until opened.
+            let hidden = std::env::args().any(|a| a == "--hidden");
+            if !hidden {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+            {
+                let st = app.state::<AppState>();
+                let mut inner = st.inner.lock().unwrap();
+                // Keep the startup entry pointing at this copy of the app.
+                if inner.settings.start_with_windows {
+                    let _ = set_autostart(true);
+                }
+                // A fresh install has nothing to tell about; later updates show their notes once.
+                if inner.settings.seen_version.is_none() {
+                    // Already set up before this setting existed (0.1.23 or older): show 0.1.24's notes.
+                    let seen = if inner.settings.joined { "0.1.23" } else { VERSION };
+                    inner.settings.seen_version = Some(seen.into());
+                    let _ = save_json("settings.json", &inner.settings);
+                }
             }
             let open = MenuItem::with_id(app, "open", "Open Sterling Quest Sync", true, None::<&str>)?;
             let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
@@ -1390,6 +1588,8 @@ fn main() {
             update_sterling,
             update_app,
             check_for_app_update,
+            support_details,
+            dismiss_whats_new,
             open_backups,
             open_page,
             hide_to_tray,

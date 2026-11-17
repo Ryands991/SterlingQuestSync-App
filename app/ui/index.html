@@ -142,6 +142,9 @@
         <div class="bar"><div class="fill" id="app-fill"></div></div>
       </div>
     </div>
+    <div class="microcard warnline" id="helper-card" hidden>
+      <span><b class="bad-t">WoW didn't load the helper add-on.</b> <span class="muted">Your progress can't reach the app. Exit WoW completely and start it again, then check Sterling Quest Sync is ticked in AddOns at character select.</span></span>
+    </div>
     <div class="microcard" id="sterling-card" hidden>
       <span id="sterling-text"></span>
       <button type="button" class="btn small" id="sterling-update">Update</button>
@@ -205,6 +208,8 @@
     <section class="card">
       <h2>Syncing and updates</h2>
       <label class="toggle"><span>Sync automatically<span class="small muted block">Shares your progress each time the game saves (when you /reload or log out)</span></span><input type="checkbox" id="s-auto"></label>
+      <label class="toggle"><span>Start with Windows<span class="small muted block">Opens quietly in the tray when you sign in to Windows</span></span><input type="checkbox" id="s-startup"></label>
+      <label class="toggle"><span>Notify me about favourites<span class="small muted block">A Windows notification when a favourite's new progress arrives</span></span><input type="checkbox" id="s-notify"></label>
       <label class="toggle"><span>Close button keeps it running in the tray<span class="small muted block">Off: the X quits the app. Quit any time from the tray icon.</span></span><input type="checkbox" id="s-tray"></label>
       <label class="toggle"><span>Update this app automatically<span class="small muted block">Off: ask me when a new version is out</span></span><input type="checkbox" id="s-app-auto"></label>
       <div class="kv"><span>App version <b id="s-appver"></b><span class="small muted block" id="s-ver-note">Checks on its own every few hours.</span></span><span class="btns"><button type="button" class="btn small" id="s-check">Check for updates</button><button type="button" class="btn small" id="s-update" hidden>Update</button></span></div>
@@ -217,11 +222,15 @@
       <p class="small muted">The app only changes its own helper add-on, Sterling (when it updates it) and its own data. It never changes your game settings (the WTF folder) or any other add-on.</p>
       <div class="kv"><span>Backups of Sterling's saved data<span class="small muted block">Made before the app changes anything</span></span><button type="button" class="btn small" id="s-backups">Open folder</button></div>
     </section>
+    <section class="card">
+      <h2>Help</h2>
+      <div class="kv"><span>Something not working?<span class="small muted block">Copies the app's version, game folder type, add-on status and recent errors. No codes or account details. Paste it to whoever is helping you.</span></span><span class="btns"><button type="button" class="btn small" id="s-details">Copy details for help</button><button type="button" class="btn small ghost" data-open="help">Troubleshooting</button></span></div>
+    </section>
     <section class="card danger">
       <div><div class="dt">Delete my data</div><div class="small">Removes your account, PCs, pairings and copies from the server. Copies already on friends' PCs stay there.</div></div>
       <button type="button" class="btn bad" id="s-delete">Delete...</button>
     </section>
-    <div class="about"><span>Sterling Quest Sync <span id="s-ver"></span>. Built by Kael with the help of Claude Opus.</span><span><a href="#" data-open="privacy">Privacy</a> · <a href="#" data-open="repo">Source</a> · <a href="#" data-open="issues">Report a bug</a></span></div>
+    <div class="about"><span>Sterling Quest Sync <span id="s-ver"></span>. Built by Kael with the help of Claude Opus.</span><span><a href="#" data-open="help">Help</a> · <a href="#" data-open="privacy">Privacy</a> · <a href="#" data-open="repo">Source</a> · <a href="#" data-open="issues">Report a bug</a></span></div>
   </main>
 </div>
 

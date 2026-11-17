@@ -53,8 +53,20 @@ async function busy(btn, fn) {
   if (btn) btn.disabled = true;
   try { return await fn(); } catch (e) { fail(e); } finally { if (btn) btn.disabled = false; }
 }
-async function copy(text) {
-  try { await navigator.clipboard.writeText(text); toast("Copied"); } catch (_) { fail("Couldn't copy. Select the code and press Ctrl+C."); }
+async function copy(text, done) {
+  try { await navigator.clipboard.writeText(text); toast(done || "Copied"); } catch (_) { fail("Couldn't copy. Select the text and press Ctrl+C."); }
+}
+function inviteText() {
+  return [
+    "Want our quests to sync even when we play at different times? Get the Sterling Quest Sync app (free, Windows):",
+    "https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest",
+    "",
+    "1. Download SterlingQuestSync_<version>_x64-setup.exe and run it. If Windows says \"Windows protected your PC\", click More info, then Run anyway.",
+    "2. The app finds your WoW Forever folder and sets everything up. No email or password.",
+    "3. Exit WoW completely and start it again (/reload isn't enough), then log in.",
+    "",
+    "We'll pair on our own the next time we're both online.",
+  ].join("\n");
 }
 function currentChar() {
   if (!S || !S.characters.length) return null;
@@ -101,6 +113,18 @@ function codeBox(code) {
 
 // ---------------------------------------------------------------- render
 
+let whatsNewShown = false;
+function showWhatsNew() {
+  if (whatsNewShown || !S.whats_new || !S.whats_new.length || !$("scrim").hidden) return;
+  whatsNewShown = true;
+  const body = [];
+  for (const [v, lines] of S.whats_new) {
+    body.push(el("div", "eyebrow", "VERSION " + v));
+    const ul = el("ul", "notes"); for (const l of lines) ul.append(el("li", "", l)); body.push(ul);
+  }
+  dialog("What's new", body, [["Got it", true, "primary"]]).then(() => call("dismiss_whats_new").catch(() => {}));
+}
+
 function render(s) {
   S = s;
   $("ver").textContent = "v" + s.version;
@@ -108,7 +132,7 @@ function render(s) {
   const inSetup = s.rejoin || s.setup_needed || pendingRec;
   $("setup").hidden = !inSetup;
   $("app").hidden = !!inSetup;
-  if (inSetup) renderSetup(); else renderApp();
+  if (inSetup) renderSetup(); else { renderApp(); showWhatsNew(); }
 }
 
 function showStep(id) {
@@ -229,6 +253,15 @@ function renderHome(c) {
     } else if (!S.sterling_version) {
       $("h-title").textContent = "Sterling isn't installed";
       $("h-line").textContent = "This app works with the Sterling Quest Tracker add-on. Click Install below, then restart WoW and log in.";
+    } else if (S.helper_off) {
+      $("h-title").textContent = "WoW didn't load the helper add-on";
+      dot.className = "dot bad";
+      $("h-line").textContent = "The game saved, but the app's helper add-on (Sterling Quest Sync) wasn't running, so nothing reached the app.";
+      steps([
+        "Exit WoW completely. /reload won't load a new add-on.",
+        "Start WoW. At character select, click AddOns and make sure Sterling Quest Sync is ticked.",
+        "Log in, then /reload or log out. Your character shows up here.",
+      ], "To fix it:");
     } else if (S.restart_game && S.game_running) {
       $("h-title").textContent = "Restart WoW";
       dot.className = "dot gold";
@@ -270,6 +303,8 @@ function renderHome(c) {
     $("app-text").replaceChildren(el("span", "muted", "App update: "), el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
     $("app-update").hidden = false; // the install finds and checks the signed update itself
   } else ac.hidden = true;
+
+  $("helper-card").hidden = !(c && S.helper_off);
 
   const card = $("sterling-card");
   const v = S.sterling_version, l = S.sterling_latest;
@@ -392,7 +427,13 @@ function partnerRows(c) {
     rows.push({ guid: u.guid, opts: {
       name: u.name, look: u.look, status, statusCls: cls, star: star(u.guid), right: [null, lastTime(u.look && u.look.seen)],
       menu: async () => {
-        const go2 = await dialog((u.look && u.look.nick) || u.name || "Sterling partner", [para(u.app === "no" ? "They need Sterling Quest Sync installed first. Once they have it, pairing happens on its own when you're both online in game." : "This usually pairs on its own when you're both online in game. You can also pair now with a code.", "muted")], [["Close", false, "ghost"], ["Pair a friend", true]]);
+        const who = (u.look && u.look.nick) || u.name || "Sterling partner";
+        if (u.app === "no") {
+          const v = await dialog(who, [para("You still sync live in game when you're both online. To sync when you play at different times, they need the Sterling Quest Sync app. Once they have it, the apps pair on their own the next time you're both online.", "muted"), para("Copy an invite with the download link and the setup steps, then paste it to them.", "small muted")], [["Close", false, "ghost"], ["Copy invite", "invite", "primary"]]);
+          if (v === "invite") copy(inviteText(), "Invite copied. Paste it to " + who + ".");
+          return;
+        }
+        const go2 = await dialog(who, [para("This usually pairs on its own when you're both online in game. You can also pair now with a code.", "muted")], [["Close", false, "ghost"], ["Pair with a code", true]]);
         if (go2) go("pair");
       },
     } });
@@ -522,6 +563,8 @@ function renderSettings() {
   $("s-appver").textContent = S.version;
   renderAppUpdateSettings();
   $("s-tray").checked = S.close_to_tray;
+  $("s-startup").checked = S.start_with_windows;
+  $("s-notify").checked = S.notify_favs;
   $("s-sterling").textContent = S.sterling_version ? "You have " + S.sterling_version + ". Updates install for you, and the old version is kept as a backup." : "Sterling isn't installed in this game folder.";
   $("s-path").textContent = S.game_path || "Not set";
   if (!pcsLoaded) loadPcs();
@@ -532,7 +575,15 @@ function go(p) { page = p; if (p === "settings") pcsLoaded = false; renderApp();
 // ---------------------------------------------------------------- wiring
 
 $("win-min").onclick = () => T.window.getCurrentWindow().minimize().catch(fail);
-$("win-close").onclick = () => call("close_window");
+$("win-close").onclick = async () => {
+  if (S && S.close_to_tray && !S.close_note_seen && !S.setup_needed) {
+    const v = await dialog("Still running in the tray", [para("Sterling Quest Sync keeps syncing in the background. Find it by the clock, and quit any time from its tray icon.", "muted"), para("You can change what the close button does in Settings.", "small muted")], [["Quit instead", "quit", "ghost"], ["Got it", "tray", "primary"]]);
+    if (!v) return;
+    await call("set_options", { closeNoteSeen: true }).catch(() => {});
+    if (v === "quit") return call("quit");
+  }
+  call("close_window");
+};
 for (const b of document.querySelectorAll("[data-page]")) b.addEventListener("click", () => go(b.dataset.page));
 for (const b of document.querySelectorAll("[data-copy]")) b.addEventListener("click", () => copy($(b.dataset.copy).textContent));
 for (const a of document.querySelectorAll("[data-open]")) a.addEventListener("click", (e) => { e.preventDefault(); call("open_page", { which: a.dataset.open }); });
@@ -578,6 +629,9 @@ $("sync").onclick = () => call("sync_now").catch(fail);
 $("auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-auto").onchange = (e) => call("set_options", { autoSync: e.target.checked }).catch(fail);
 $("s-tray").onchange = (e) => call("set_options", { closeToTray: e.target.checked }).catch(fail);
+$("s-startup").onchange = (e) => call("set_options", { startWithWindows: e.target.checked }).catch((err) => { e.target.checked = !e.target.checked; fail(err); });
+$("s-notify").onchange = (e) => call("set_options", { notifyFavs: e.target.checked }).catch(fail);
+$("s-details").onclick = () => busy($("s-details"), async () => copy(await call("support_details"), "Details copied. Paste them to whoever is helping you."));
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
 // A newer app version, from the updater's own check or from the server's note of the latest version.
 function appAvail() {
