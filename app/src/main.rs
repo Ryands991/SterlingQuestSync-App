@@ -72,6 +72,9 @@ struct Settings {
     window: Option<Placement>,
     /// Off by default and never suggested: the person turns it on in Settings.
     start_with_windows: bool,
+    /// Set when Start with Windows was turned off outside the app (Task Manager, Windows Settings or
+    /// another program). The app never turns it back on by itself; Settings explains why it's off.
+    autostart_note: Option<String>,
     /// Off by default: a Windows notification when a favourite's new progress arrives.
     notify_favs: bool,
     /// The one-time "still running in the tray" note was shown.
@@ -109,6 +112,7 @@ impl Default for Settings {
             restart_game: false,
             window: None,
             start_with_windows: false,
+            autostart_note: None,
             notify_favs: false,
             close_note_seen: false,
             seen_version: None,
@@ -328,6 +332,7 @@ struct Status {
     close_to_tray: bool,
     restart_game: bool,
     start_with_windows: bool,
+    autostart_note: Option<String>,
     notify_favs: bool,
     close_note_seen: bool,
     /// WoW saved Sterling's data without the helper add-on: it isn't loaded.
@@ -456,6 +461,7 @@ fn build_status(st: &AppState) -> Status {
         close_to_tray: s.close_to_tray,
         restart_game: s.restart_game,
         start_with_windows: s.start_with_windows,
+        autostart_note: s.autostart_note.clone(),
         notify_favs: s.notify_favs,
         close_note_seen: s.close_note_seen,
         helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
@@ -794,6 +800,7 @@ fn set_options(
         let mut inner = st.inner.lock().unwrap();
         if let Some(v) = start_with_windows {
             inner.settings.start_with_windows = v;
+            inner.settings.autostart_note = None;
         }
         if let Some(v) = notify_favs {
             inner.settings.notify_favs = v;
@@ -1241,6 +1248,7 @@ fn background(app: AppHandle) {
     *app.state::<AppState>().rewatch.lock().unwrap() = Some(rewatch_tx);
     let mut game = GameCheck::default();
     let _ = check_sterling_quiet(&app);
+    check_autostart(&app);
     let _ = check_app_update(&app);
     check_notices(&app);
     emit_status(&app);
@@ -1273,6 +1281,7 @@ fn background(app: AppHandle) {
             }
             if Instant::now() >= next_poll {
                 next_poll = Instant::now() + Duration::from_secs(15);
+                check_autostart(&app);
                 let (folder, auto_sterling, checked) = {
                     let st = app.state::<AppState>();
                     let inner = st.inner.lock().unwrap();
@@ -1353,6 +1362,10 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
 /// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
 const WHATS_NEW: &[(&str, &[&str])] = &[
     (
+        "0.1.28",
+        &["If Start with Windows is turned off in Task Manager or Windows Settings, the app leaves it off and says so in Settings."],
+    ),
+    (
         "0.1.27",
         &["Installing a new version over a much older one works again, without uninstalling first."],
     ),
@@ -1397,23 +1410,97 @@ fn whats_new(seen: Option<&str>) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
+const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+/// Where Windows remembers startup entries switched off in Task Manager or Settings > Apps > Startup.
+#[cfg_attr(not(windows), allow(dead_code))]
+const APPROVED_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+#[cfg_attr(not(windows), allow(dead_code))]
+const RUN_NAME: &str = "SterlingQuestSync";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Autostart {
+    /// The entry is there and Windows runs it.
+    On,
+    /// The entry is there, but switched off in Task Manager or Windows Settings.
+    OffInWindows,
+    /// The entry is gone (removed by another program, or never added).
+    Missing,
+}
+
+/// Windows' own rule: the first byte of the StartupApproved value is even (2, 6) when the entry is
+/// allowed to run and odd (3, 7) when it was switched off. No value means allowed.
+fn classify_autostart(run_present: bool, approved: Option<&[u8]>) -> Autostart {
+    if !run_present {
+        return Autostart::Missing;
+    }
+    match approved.and_then(|b| b.first()) {
+        Some(b) if b & 1 == 1 => Autostart::OffInWindows,
+        _ => Autostart::On,
+    }
+}
+
+#[cfg(windows)]
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Reads one registry value under HKCU. None when it isn't there.
+#[cfg(windows)]
+fn reg_read(key: &str, name: &str) -> Option<Vec<u8>> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_ANY};
+    let (k, n) = (wide(key), wide(name));
+    let mut len: u32 = 0;
+    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), std::ptr::null_mut(), &mut len) };
+    if r != 0 {
+        return None;
+    }
+    let mut buf = vec![0u8; len as usize];
+    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
+    if r != 0 {
+        return None;
+    }
+    buf.truncate(len as usize);
+    Some(buf)
+}
+
+/// What Windows will do with the app's startup entry right now.
+fn autostart_state() -> Autostart {
+    #[cfg(windows)]
+    {
+        let run = reg_read(RUN_KEY, RUN_NAME).is_some();
+        let approved = reg_read(APPROVED_KEY, RUN_NAME);
+        classify_autostart(run, approved.as_deref())
+    }
+    #[cfg(not(windows))]
+    {
+        Autostart::Missing
+    }
+}
+
 /// Adds or removes the app from Windows startup, for this Windows user only (no admin needed).
-/// It starts with --hidden, so it goes straight to the tray.
+/// It starts with --hidden, so it goes straight to the tray. Only ever called for the person's own
+/// choice in Settings (or to keep the path current while it's on); never to undo a change made
+/// outside the app.
 fn set_autostart(on: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
-        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let key = w("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-        let name = w("SterlingQuestSync");
+        use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_BINARY, REG_SZ};
+        let (key, name, approved) = (wide(RUN_KEY), wide(RUN_NAME), wide(APPROVED_KEY));
         if on {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-            let cmd = w(&format!("\"{}\" --hidden", exe.display()));
+            let cmd = wide(&format!("\"{}\" --hidden", exe.display()));
             let r = unsafe {
                 RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, cmd.as_ptr().cast(), (cmd.len() * 2) as u32)
             };
             if r != 0 {
                 return Err(format!("Couldn't add the app to Windows startup (error {r})."));
+            }
+            // The person just turned it on here, so a switch-off from Task Manager is lifted too
+            // (the same value Task Manager writes when you click Enable).
+            if autostart_state() == Autostart::OffInWindows {
+                let enabled: [u8; 12] = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, approved.as_ptr(), name.as_ptr(), REG_BINARY, enabled.as_ptr().cast(), 12) };
             }
         } else {
             let r = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) };
@@ -1421,6 +1508,7 @@ fn set_autostart(on: bool) -> Result<(), String> {
             if r != 0 && r != 2 {
                 return Err(format!("Couldn't remove the app from Windows startup (error {r})."));
             }
+            unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, approved.as_ptr(), name.as_ptr()) };
         }
         Ok(())
     }
@@ -1428,6 +1516,35 @@ fn set_autostart(on: bool) -> Result<(), String> {
     {
         let _ = on;
         Err("Start with Windows only works on Windows.".into())
+    }
+}
+
+/// Start with Windows is on in the app but Windows says otherwise: someone switched it off in Task
+/// Manager or Windows Settings, or another program removed it. Respect that: turn the app's setting
+/// off too and say why in Settings. Never turns it back on.
+fn check_autostart(app: &AppHandle) {
+    if !cfg!(windows) {
+        return;
+    }
+    let changed = {
+        let st = app.state::<AppState>();
+        let mut inner = st.inner.lock().unwrap();
+        if !inner.settings.start_with_windows {
+            return;
+        }
+        let note = match autostart_state() {
+            Autostart::On => return,
+            Autostart::OffInWindows => "Turned off outside the app (in Task Manager or Windows Settings > Apps > Startup), so it stays off. Turn it back on here if you want it.",
+            Autostart::Missing => "Removed from Windows startup by another program, so it stays off. Turn it back on here if you want it.",
+        };
+        inner.settings.start_with_windows = false;
+        inner.settings.autostart_note = Some(note.into());
+        inner.log("Start with Windows was turned off outside the app. Left off.", "");
+        let _ = save_json("settings.json", &inner.settings);
+        true
+    };
+    if changed {
+        emit_status(app);
     }
 }
 
@@ -1817,8 +1934,9 @@ fn main() {
             {
                 let st = app.state::<AppState>();
                 let mut inner = st.inner.lock().unwrap();
-                // Keep the startup entry pointing at this copy of the app.
-                if inner.settings.start_with_windows {
+                // Keep the startup entry pointing at this copy of the app, but only while Windows still
+                // has it switched on: a startup entry turned off or removed outside the app stays off.
+                if inner.settings.start_with_windows && autostart_state() == Autostart::On {
                     let _ = set_autostart(true);
                 }
                 // A fresh install has nothing to tell about; later updates show their notes once.
@@ -1912,6 +2030,17 @@ mod tests {
     /// strands people on an old version (0.1.24's publisher change broke installing over 0.1.23, and
     /// the repo move broke 0.1.23's update check). If one really must change, the installer and the
     /// update feed need a plan first; see "Sterling Quest Sync - Updates, Notices and Deploys".
+    #[test]
+    fn startup_state_follows_windows() {
+        assert_eq!(classify_autostart(true, None), Autostart::On);
+        assert_eq!(classify_autostart(true, Some(&[2, 0, 0, 0])), Autostart::On);
+        assert_eq!(classify_autostart(true, Some(&[6, 0, 0, 0])), Autostart::On);
+        assert_eq!(classify_autostart(true, Some(&[3, 0, 0, 0, 1, 2])), Autostart::OffInWindows);
+        assert_eq!(classify_autostart(true, Some(&[7])), Autostart::OffInWindows);
+        assert_eq!(classify_autostart(false, None), Autostart::Missing);
+        assert_eq!(classify_autostart(false, Some(&[2])), Autostart::Missing);
+    }
+
     #[test]
     fn install_identity_never_changes() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();

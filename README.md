@@ -18,7 +18,7 @@ The [Sterling Quest Sync](https://github.com/SterlingAddons/SterlingQuest) add-o
 - **Or pair with a code.** One of you makes a code, the other types it in. Nobody can find you or send you a request.
 - **Favourites.** Star up to 5 partners. They stay on top in the app and in game, and starring in one shows up in the other.
 - **Keeps the add-on up to date** if you want it to (Settings). If WowUp or the CurseForge app already looks after the add-on, the Companion leaves updates to them and just tells you when one is out.
-- **Stays out of the way.** Lives in the tray, works in the background at low priority. Can start with Windows if you turn that on in Settings (off by default).
+- **Stays out of the way.** Lives in the tray, works in the background at low priority. Can start with Windows if you turn that on in Settings (off by default). If you later turn it off in Task Manager or Windows Settings, the app respects that and never turns it back on by itself.
 - **Optional notifications** when a favourite's new progress arrives (off by default).
 - **Important news on Home.** If something needs your attention, like an update you have to install by hand, a short banner shows on the Home page, only for the app versions it's about. Close it with the x.
 - **Invite friends** who don't have the app yet: their row on the Partners page has a **Copy invite** button with the download link and setup steps.

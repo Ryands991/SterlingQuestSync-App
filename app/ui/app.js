@@ -576,6 +576,9 @@ function renderSettings() {
   renderAppUpdateSettings();
   $("s-tray").checked = S.close_to_tray;
   $("s-startup").checked = S.start_with_windows;
+  // Switched off outside the app (Task Manager, Windows Settings, another program): it stays off, and says so.
+  $("s-startup-note").hidden = !S.autostart_note;
+  $("s-startup-note").textContent = S.autostart_note || "";
   $("s-notify").checked = S.notify_favs;
   const mgrs = S.sterling_managed_by || [];
   $("s-sterling").textContent = !S.sterling_version ? "Sterling Quest Sync isn't installed in this game folder."
