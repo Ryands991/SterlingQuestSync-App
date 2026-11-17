@@ -305,6 +305,12 @@ function renderHome(c) {
     $("app-text").replaceChildren(el("span", "muted", "App update: "), el("b", "", "Companion "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
     $("app-update").hidden = false; // the install finds and checks the signed update itself
   } else ac.hidden = true;
+  // A failed update says why, and offers the installer from the releases page instead.
+  const failed = !up && av && S.update_failed;
+  $("app-fail").hidden = !failed;
+  $("app-download").hidden = !failed;
+  $("app-update").textContent = failed ? "Try again" : "Update";
+  if (failed) $("app-fail").replaceChildren(el("b", "bad-t", "The update didn't work. "), el("span", "muted", S.update_failed + ". You can download the new version and run it yourself; your settings and partners stay."));
 
   $("helper-card").hidden = !(c && S.helper_off);
 
@@ -713,6 +719,7 @@ async function askUpdate(btn) {
   if (ok) busy(btn, () => call("update_app"));
 }
 $("app-update").onclick = () => askUpdate($("app-update"));
+$("app-download").onclick = () => call("open_page", { which: "download" }).catch(fail);
 $("s-update").onclick = () => askUpdate($("s-update"));
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);

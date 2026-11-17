@@ -178,6 +178,8 @@ struct Inner {
     managers: Vec<String>,
     /// The owner's notices from the server, as last fetched (filtered when shown).
     notices: Vec<notices::Notice>,
+    /// Why the last app update failed, until the next try. Home then offers a manual download.
+    update_failed: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -336,6 +338,7 @@ struct Status {
     whats_new: Vec<(String, Vec<String>)>,
     /// The owner's notices for this version, not dismissed.
     notices: Vec<notices::Notice>,
+    update_failed: Option<String>,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -458,6 +461,7 @@ fn build_status(st: &AppState) -> Status {
         helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
         whats_new: whats_new(s.seen_version.as_deref()),
         notices: notices::for_app(&inner.notices, VERSION, &s.dismissed_notices, now()),
+        update_failed: inner.update_failed.clone(),
         sterling_managed_by: if s.sterling_by_app { Vec::new() } else { inner.managers.clone() },
         last_sync,
         last_error: inner.last_error.clone(),
@@ -1047,11 +1051,25 @@ fn full_error(e: &dyn std::error::Error) -> String {
 
 // ------------------------------------------------------------------ app updates
 
+/// Asks the update feed, and once more a few seconds later if that fails, so a short network
+/// blip doesn't count as a failed update. The feed addresses are tried in order (tauri.conf.json):
+/// this project's own server first, then GitHub.
+async fn check_feed(u: &tauri_plugin_updater::Updater) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    match u.check().await {
+        Ok(found) => Ok(found),
+        Err(_) => {
+            // Every caller runs this on its own thread (block_on), so a plain sleep holds up nothing else.
+            std::thread::sleep(Duration::from_secs(3));
+            u.check().await.map_err(|e| full_error(&e))
+        }
+    }
+}
+
 /// Asks the update feed whether a newer, signed app is out. Signature checks happen on install.
 fn check_app_update(app: &AppHandle) -> Option<String> {
     let found = tauri::async_runtime::block_on(async {
         let u = app.updater().ok()?;
-        u.check().await.ok().flatten().map(|x| x.version)
+        check_feed(&u).await.ok().flatten().map(|x| x.version)
     });
     let st = app.state::<AppState>();
     st.inner.lock().unwrap().app_update = found.clone();
@@ -1072,13 +1090,14 @@ fn install_app_update(app: &AppHandle) -> Result<(), String> {
             return Err("Already updating.".into());
         }
         inner.updating = Some(UpdateStep { step: "Getting ready".into(), percent: None });
+        inner.update_failed = None;
         inner.log("Updating the Companion...", "");
     }
     emit_status(app);
     let result = tauri::async_runtime::block_on(async {
         let u = app.updater().map_err(|e| e.to_string())?;
         set("Finding the update", None);
-        let up = u.check().await.map_err(|e| full_error(&e))?.ok_or("You already have the newest version.")?;
+        let up = check_feed(&u).await?.ok_or("You already have the newest version.")?;
         let mut got: u64 = 0;
         let mut shown: Option<u8> = None;
         set("Downloading", Some(0));
@@ -1114,7 +1133,7 @@ fn check_for_app_update(app: AppHandle) -> Result<Option<String>, String> {
     let found = off_runtime(move || {
         tauri::async_runtime::block_on(async {
             let u = a.updater().map_err(|e| e.to_string())?;
-            u.check().await.map(|x| x.map(|x| x.version)).map_err(|e| full_error(&e))
+            check_feed(&u).await.map(|x| x.map(|x| x.version))
         })
     })
     .map_err(|e| format!("Couldn't check for updates: {e}"))?;
@@ -1137,6 +1156,7 @@ fn update_app(app: AppHandle) -> Result<(), String> {
             let st = app.state::<AppState>();
             let mut inner = st.inner.lock().unwrap();
             inner.updating = None;
+            inner.update_failed = Some(e.clone());
             inner.log(format!("App update failed: {e}"), "bad");
         }
         emit_status(&app);
@@ -1332,6 +1352,13 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
 
 /// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
 const WHATS_NEW: &[(&str, &[&str])] = &[
+    (
+        "0.1.26",
+        &[
+            "Updates are sturdier: the app asks Sterling's own server where the newest version is, with GitHub as a backup, and tries again if the first try fails.",
+            "If an update still fails, Home says why and offers the download to install it yourself.",
+        ],
+    ),
     (
         "0.1.25",
         &[
@@ -1746,6 +1773,7 @@ fn main() {
             candidate: None,
             offline_since: None,
             notices: Vec::new(),
+            update_failed: None,
             managers: Vec::new(),
         }),
         keys: Arc::new(SystemStore),

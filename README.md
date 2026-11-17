@@ -79,6 +79,10 @@ That news travels in game. Be online at the same time as your friend, then `/rel
 - Look for the Companion's icon by the clock. Closing the window hides it there instead of quitting.
 - Still won't open? The reason is saved in `%APPDATA%\SterlingQuestSync\crash.log`. Email it to support@sterlingaddons.com or open an issue.
 
+**An app update fails**
+
+Home says why and shows **Download it yourself**. Click it, download the newest `SterlingQuestSync_<version>_x64-setup.exe` and run it. It installs over the old version; your settings and partners stay. (Versions before 0.1.24 can't update on their own any more: install the newest one this way once.)
+
 **"Can't reach the server"**
 
 The app keeps trying on its own. If it lasts more than an hour, open an issue.

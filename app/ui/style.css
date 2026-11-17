@@ -229,3 +229,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .microcard.notice.info { border-left-color: var(--gold); } .microcard.notice.info .notice-t { color: var(--gold); }
 .microcard.notice.warn { border-left-color: #d9a441; background: #3a2a18; } .microcard.notice.warn .notice-t { color: #e0b052; }
 .microcard.notice.bad { border-color: var(--bad-line); border-left-color: #d0604f; background: var(--bad-bg); } .microcard.notice.bad .notice-t { color: var(--bad); }
+
+/* A failed app update: the reason on its own line under the card's text and buttons. */
+.microcard .upd-fail { flex-basis: 100%; padding: 0 8px 10px 0; line-height: 1.45; }
+.microcard:has(.upd-fail:not([hidden])) { padding-top: 8px; }
