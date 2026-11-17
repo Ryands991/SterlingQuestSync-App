@@ -10,6 +10,7 @@ pub mod lua;
 pub mod paths;
 pub mod safety;
 pub mod updater;
+pub mod notices;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

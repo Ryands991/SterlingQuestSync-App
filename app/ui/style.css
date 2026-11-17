@@ -220,3 +220,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--btn); width: 18px;
 .warn-t { color: var(--gold); font-weight: 700; }
 .microcard:has(.upd:not([hidden])) { padding-top: 10px; }
 .microcard.warnline { padding: 10px 14px; background: var(--bad-bg); border-color: var(--bad-line); line-height: 1.45; }
+
+/* Notices from the server owner: gold news, amber heads-up, red action needed. */
+.microcard.notice { padding: 8px 6px 8px 14px; border-left-width: 4px; flex-wrap: nowrap; line-height: 1.45; }
+.microcard.notice .notice-t { font-weight: 600; flex: 1; min-width: 0; }
+.microcard.notice .notice-acts { display: flex; gap: 6px; flex: 0 0 auto; }
+.microcard.notice .notice-x { min-width: 32px; padding: 0; font-size: 18px; line-height: 1; }
+.microcard.notice.info { border-left-color: var(--gold); } .microcard.notice.info .notice-t { color: var(--gold); }
+.microcard.notice.warn { border-left-color: #d9a441; background: #3a2a18; } .microcard.notice.warn .notice-t { color: #e0b052; }
+.microcard.notice.bad { border-color: var(--bad-line); border-left-color: #d0604f; background: var(--bad-bg); } .microcard.notice.bad .notice-t { color: var(--bad); }

@@ -49,6 +49,9 @@ pub struct Meta {
     pub api: i64,
     pub min_app: String,
     pub signups: String,
+    /// The owner's notices. Older servers don't send any.
+    #[serde(default)]
+    pub notices: Vec<crate::notices::Notice>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -179,11 +182,23 @@ pub struct Client {
     http: reqwest::blocking::Client,
 }
 
+static APP_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// The app sets its own version once at start, so requests say which Companion version sent them
+/// ("SterlingQuestSync/0.1.25"). The server keeps it per PC, so the owner can count installs per version.
+pub fn set_app_version(v: &'static str) {
+    let _ = APP_VERSION.set(v);
+}
+
+pub fn user_agent() -> String {
+    format!("SterlingQuestSync/{}", APP_VERSION.get().copied().unwrap_or("0.0.0"))
+}
+
 fn http() -> Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .connect_timeout(Duration::from_secs(10))
-        .user_agent(concat!("SterlingQuestSync/", env!("CARGO_PKG_VERSION")))
+        .user_agent(user_agent())
         .https_only(false)
         .redirect(reqwest::redirect::Policy::none())
         .build()

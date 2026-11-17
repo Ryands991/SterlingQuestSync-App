@@ -65,7 +65,7 @@ fn github() -> Result<reqwest::blocking::Client> {
     });
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
-        .user_agent(concat!("SterlingQuestSync/", env!("CARGO_PKG_VERSION")))
+        .user_agent(crate::api::user_agent())
         .redirect(policy)
         .build()
         .map_err(|e| Error::Server(format!("network setup failed: {e}")))

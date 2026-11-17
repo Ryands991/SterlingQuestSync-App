@@ -290,6 +290,8 @@ function renderHome(c) {
   }
   $("h-last").textContent = S.last_sync ? "Last synced " + ago(S.last_sync) : "Not synced yet";
 
+  renderNotices();
+
   const ac = $("app-card");
   const av = S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
   const up = S.updating;
@@ -641,6 +643,31 @@ $("s-notify").onchange = (e) => call("set_options", { notifyFavs: e.target.check
 $("s-details").onclick = () => busy($("s-details"), async () => copy(await call("support_details"), "Details copied. Paste them to whoever is helping you."));
 $("s-app-auto").onchange = (e) => call("set_options", { autoUpdateApp: e.target.checked }).catch(fail);
 // A newer app version, from the updater's own check or from the server's note of the latest version.
+// The owner's notices from the server, already checked and picked for this version by the app.
+// Text is only ever set with textContent; the button opens the link through the app, which checks it again.
+function renderNotices() {
+  const box = $("notices");
+  const list = S.notices || [];
+  box.hidden = !list.length;
+  box.replaceChildren(...list.map((n) => {
+    const card = el("div", "microcard notice " + (["info", "warn", "bad"].includes(n.level) ? n.level : "info"));
+    card.setAttribute("role", n.level === "bad" ? "alert" : "status");
+    card.append(el("span", "notice-t", n.text));
+    const acts = el("span", "notice-acts");
+    if (n.link) {
+      const b = el("button", "btn small", "Open"); b.type = "button";
+      b.onclick = () => call("open_notice", { id: n.id }).catch(fail);
+      acts.append(b);
+    }
+    const x = el("button", "btn small ghost notice-x", "\u00d7"); x.type = "button";
+    x.title = "Hide this message"; x.setAttribute("aria-label", "Hide this message");
+    x.onclick = () => call("dismiss_notice", { id: n.id }).catch(fail);
+    acts.append(x);
+    card.append(acts);
+    return card;
+  }));
+}
+
 function appAvail() {
   return S.app_update || (S.app_latest && newer(S.app_latest, S.version) ? S.app_latest : null);
 }

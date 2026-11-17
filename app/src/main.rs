@@ -26,7 +26,7 @@ use sqs_core::game::{GameCheck, SaveWatcher};
 use sqs_core::keystore::{KeyStore, SystemStore};
 use sqs_core::paths::{self, GameFolder};
 use sqs_core::safety::{write_app_file, SafeFs};
-use sqs_core::{companion, updater, Error};
+use sqs_core::{companion, notices, updater, Error};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_ACTIVITY: usize = 200;
@@ -81,6 +81,8 @@ struct Settings {
     /// The Companion installed the add-on itself. Only then does it keep the add-on updated
     /// when an add-on manager (WowUp, the CurseForge app) is on this PC, so the two don't fight.
     sterling_by_app: bool,
+    /// Notices from the server that the person closed. Kept short.
+    dismissed_notices: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -111,6 +113,7 @@ impl Default for Settings {
             close_note_seen: false,
             seen_version: None,
             sterling_by_app: false,
+            dismissed_notices: Vec::new(),
         }
     }
 }
@@ -173,6 +176,8 @@ struct Inner {
     offline_since: Option<i64>,
     /// Add-on managers seen on this PC (WowUp, the CurseForge app).
     managers: Vec<String>,
+    /// The owner's notices from the server, as last fetched (filtered when shown).
+    notices: Vec<notices::Notice>,
 }
 
 #[derive(Serialize, Clone)]
@@ -329,6 +334,8 @@ struct Status {
     sterling_managed_by: Vec<String>,
     /// Notes for versions newer than the one last seen, shown once after an update.
     whats_new: Vec<(String, Vec<String>)>,
+    /// The owner's notices for this version, not dismissed.
+    notices: Vec<notices::Notice>,
     last_sync: Option<i64>,
     last_error: Option<String>,
     busy: bool,
@@ -450,6 +457,7 @@ fn build_status(st: &AppState) -> Status {
         close_note_seen: s.close_note_seen,
         helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
         whats_new: whats_new(s.seen_version.as_deref()),
+        notices: notices::for_app(&inner.notices, VERSION, &s.dismissed_notices, now()),
         sterling_managed_by: if s.sterling_by_app { Vec::new() } else { inner.managers.clone() },
         last_sync,
         last_error: inner.last_error.clone(),
@@ -980,6 +988,63 @@ fn update_sterling(app: AppHandle) -> Result<String, String> {
     install_sterling(&app)
 }
 
+// ------------------------------------------------------------------ notices
+
+/// Fetches the owner's notices (with /v1/meta: no key, nothing about this PC is sent).
+/// Quiet: if the server can't be reached the last ones stay.
+fn check_notices(app: &AppHandle) {
+    let server = app.state::<AppState>().inner.lock().unwrap().settings.server.clone();
+    if let Ok(m) = api::Client::meta(&server) {
+        app.state::<AppState>().inner.lock().unwrap().notices = m.notices;
+    }
+}
+
+#[tauri::command]
+fn dismiss_notice(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    {
+        let mut inner = st.inner.lock().unwrap();
+        let list = &mut inner.settings.dismissed_notices;
+        if !list.contains(&id) {
+            list.push(id);
+            // Only recent ones matter: a removed notice never comes back with the same id.
+            let extra = list.len().saturating_sub(30);
+            list.drain(..extra);
+        }
+        save_json("settings.json", &inner.settings).map_err(|e| e.to_string())?;
+    }
+    emit_status(&app);
+    Ok(())
+}
+
+/// The notice's button. The link is checked again here, right before it opens.
+#[tauri::command]
+fn open_notice(st: State<'_, AppState>, id: String) -> Result<(), String> {
+    let link = {
+        let inner = st.inner.lock().unwrap();
+        inner.notices.iter().find(|n| n.id == id).and_then(|n| n.link.clone())
+    };
+    match link {
+        Some(l) if notices::link_ok(&l) => open_url(&l),
+        _ => Err("That link isn't available.".into()),
+    }
+}
+
+/// An error with everything that caused it ("error sending request: connection refused"),
+/// so a failed update says why instead of only which address it tried.
+fn full_error(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut cur = e.source();
+    while let Some(c) = cur {
+        let t = c.to_string();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push_str(": ");
+            out.push_str(&t);
+        }
+        cur = c.source();
+    }
+    out
+}
+
 // ------------------------------------------------------------------ app updates
 
 /// Asks the update feed whether a newer, signed app is out. Signature checks happen on install.
@@ -1013,7 +1078,7 @@ fn install_app_update(app: &AppHandle) -> Result<(), String> {
     let result = tauri::async_runtime::block_on(async {
         let u = app.updater().map_err(|e| e.to_string())?;
         set("Finding the update", None);
-        let up = u.check().await.map_err(|e| e.to_string())?.ok_or("You already have the newest version.")?;
+        let up = u.check().await.map_err(|e| full_error(&e))?.ok_or("You already have the newest version.")?;
         let mut got: u64 = 0;
         let mut shown: Option<u8> = None;
         set("Downloading", Some(0));
@@ -1031,7 +1096,7 @@ fn install_app_update(app: &AppHandle) -> Result<(), String> {
             || set("Checking the signature and installing. The app reopens in a moment.", None),
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| full_error(&e))?;
         Ok::<(), String>(())
     });
     if let Err(e) = result {
@@ -1049,7 +1114,7 @@ fn check_for_app_update(app: AppHandle) -> Result<Option<String>, String> {
     let found = off_runtime(move || {
         tauri::async_runtime::block_on(async {
             let u = a.updater().map_err(|e| e.to_string())?;
-            u.check().await.map(|x| x.map(|x| x.version)).map_err(|e| e.to_string())
+            u.check().await.map(|x| x.map(|x| x.version)).map_err(|e| full_error(&e))
         })
     })
     .map_err(|e| format!("Couldn't check for updates: {e}"))?;
@@ -1104,6 +1169,11 @@ fn open_page(which: String) -> Result<(), String> {
         "download" => "https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest",
         _ => return Err("unknown page".into()),
     };
+    open_url(url)
+}
+
+/// Opens one of Sterling's own pages in the browser. Callers pass fixed or checked addresses only.
+fn open_url(url: &str) -> Result<(), String> {
     #[cfg(windows)]
     let r = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
     #[cfg(target_os = "macos")]
@@ -1152,6 +1222,7 @@ fn background(app: AppHandle) {
     let mut game = GameCheck::default();
     let _ = check_sterling_quiet(&app);
     let _ = check_app_update(&app);
+    check_notices(&app);
     emit_status(&app);
     loop {
         let dirs: Vec<(String, PathBuf)> = {
@@ -1220,6 +1291,7 @@ fn background(app: AppHandle) {
                         emit_status(&app);
                     }
                     if checked.is_none_or(|c| c.elapsed() >= STERLING_CHECK_EVERY) {
+                        check_notices(&app);
                         let auto_app = app.state::<AppState>().inner.lock().unwrap().settings.auto_update_app;
                         if check_app_update(&app).is_some() && auto_app && !running {
                             let _ = install_app_update(&app);
@@ -1259,16 +1331,25 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
-const WHATS_NEW: &[(&str, &[&str])] = &[(
-    "0.1.24",
-    &[
-        "New names: the add-on is now Sterling Quest Sync, and this app is its Companion.",
-        "The app notices when WoW didn't load the Companion add-on and tells you how to fix it.",
-        "If WowUp or the CurseForge app keeps the add-on updated, the Companion leaves it to them.",
-        "New in Settings: Start with Windows, favourite notifications and Copy details for help.",
-        "Invite a friend who doesn't have the app from their row on the Partners page.",
-    ],
-)];
+const WHATS_NEW: &[(&str, &[&str])] = &[
+    (
+        "0.1.25",
+        &[
+            "Important news about the app now shows as a banner on Home, only for the versions it's about.",
+            "If an update fails, the message now says why.",
+        ],
+    ),
+    (
+        "0.1.24",
+        &[
+            "New names: the add-on is now Sterling Quest Sync, and this app is its Companion.",
+            "The app notices when WoW didn't load the Companion add-on and tells you how to fix it.",
+            "If WowUp or the CurseForge app keeps the add-on updated, the Companion leaves it to them.",
+            "New in Settings: Start with Windows, favourite notifications and Copy details for help.",
+            "Invite a friend who doesn't have the app from their row on the Partners page.",
+        ],
+    ),
+];
 
 fn newer_version(a: &str, b: &str) -> bool {
     let p = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
@@ -1632,6 +1713,7 @@ fn startup_failed(err: &str) {
 }
 
 fn main() {
+    api::set_app_version(VERSION);
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         crash_log(&format!("crashed: {info}"));
@@ -1663,6 +1745,7 @@ fn main() {
             updating: None,
             candidate: None,
             offline_since: None,
+            notices: Vec::new(),
             managers: Vec::new(),
         }),
         keys: Arc::new(SystemStore),
@@ -1774,6 +1857,8 @@ fn main() {
             check_for_app_update,
             support_details,
             dismiss_whats_new,
+            dismiss_notice,
+            open_notice,
             open_backups,
             open_page,
             hide_to_tray,
