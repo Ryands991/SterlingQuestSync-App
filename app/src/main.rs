@@ -1281,7 +1281,6 @@ fn background(app: AppHandle) {
             }
             if Instant::now() >= next_poll {
                 next_poll = Instant::now() + Duration::from_secs(15);
-                check_autostart(&app);
                 let (folder, auto_sterling, checked) = {
                     let st = app.state::<AppState>();
                     let inner = st.inner.lock().unwrap();
@@ -1521,7 +1520,7 @@ fn set_autostart(on: bool) -> Result<(), String> {
 
 /// Start with Windows is on in the app but Windows says otherwise: someone switched it off in Task
 /// Manager or Windows Settings, or another program removed it. Respect that: turn the app's setting
-/// off too and say why in Settings. Never turns it back on.
+/// off too and say why in Settings. Never turns it back on. Runs once at launch (two registry reads).
 fn check_autostart(app: &AppHandle) {
     if !cfg!(windows) {
         return;
