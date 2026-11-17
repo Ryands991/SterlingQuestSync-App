@@ -49,7 +49,7 @@ jobs:
           gh release download "$TAG" --dir files --clobber
           ls -l files
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-files-before-${{ inputs.tag }}
           path: files/

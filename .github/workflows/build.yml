@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: write   # only used on a version tag, to make a DRAFT release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Tests (core and app)
@@ -29,7 +29,7 @@ jobs:
           $v = (Get-Content app/tauri.conf.json | ConvertFrom-Json).version
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item "target/release/bundle/nsis/*-setup.exe" "out/SterlingQuestSync_${v}_x64-setup.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: SterlingQuestSync-windows
           path: out/*.exe
@@ -38,7 +38,7 @@ jobs:
       # touches GitHub), then the signature and latest.json are added and the draft is published.
       - name: Draft release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           name: Sterling Quest Sync Companion ${{ github.ref_name }}
