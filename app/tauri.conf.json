@@ -11,9 +11,9 @@
     "windows": [
       {
         "label": "main",
-        "title": "Sterling Quest Sync",
-        "width": 880,
-        "height": 600,
+        "title": "Sterling Quest Sync Companion",
+        "width": 1000,
+        "height": 660,
         "minWidth": 720,
         "minHeight": 520,
         "resizable": true,
@@ -40,7 +40,7 @@
       "icons/icon.png"
     ],
     "publisher": "SterlingAddons",
-    "shortDescription": "Offline quest sync for Sterling Quest Tracker",
+    "shortDescription": "Optional companion app for the Sterling Quest Sync add-on",
     "copyright": "MIT",
     "windows": {
       "nsis": {

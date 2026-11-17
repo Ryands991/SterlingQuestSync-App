@@ -1,5 +1,5 @@
 name: Report abuse
-description: Someone is misusing Sterling Quest Sync, for example sending you data you didn't agree to or misusing a pairing code.
+description: Someone is misusing Sterling Quest Sync Companion, for example sending you data you didn't agree to or misusing a pairing code.
 title: "Abuse report: "
 labels: ["abuse"]
 body:

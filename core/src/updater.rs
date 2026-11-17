@@ -1,6 +1,6 @@
-//! Keeps Sterling Quest Tracker up to date from its GitHub releases.
+//! Keeps the Sterling Quest Sync add-on up to date from its GitHub releases.
 //!
-//! Only `Sterling-<version>.zip` from Kael's repo. The zip is checked entry by entry (no `..`,
+//! Only `Sterling-<version>.zip` from the add-on's own repo. The zip is checked entry by entry (no `..`,
 //! no absolute paths, no links, only a top `Sterling/` folder, size caps), staged inside the
 //! companion folder, then swapped in with two quick renames on the same drive. The old copy is
 //! moved aside (never deleted) and kept for a few updates.

@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sterling Quest Sync</title>
+<title>Sterling Quest Sync Companion</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="frame">
 
 <header class="titlebar" data-tauri-drag-region>
-  <div class="brand" data-tauri-drag-region><img class="logo" src="icon.png" alt="" width="20" height="20" data-tauri-drag-region><span class="name" data-tauri-drag-region>Sterling Quest Sync</span><span class="ver" id="ver" data-tauri-drag-region></span></div>
+  <div class="brand" data-tauri-drag-region><img class="logo" src="icon.png" alt="" width="20" height="20" data-tauri-drag-region><span class="name" data-tauri-drag-region>Sterling Quest Sync Companion</span><span class="ver" id="ver" data-tauri-drag-region></span></div>
   <div class="winbtns">
     <button type="button" id="win-min" aria-label="Minimize" title="Minimize"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5"/></svg></button>
     <button type="button" id="win-close" class="close" aria-label="Close" title="Close"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5"/></svg></button>
@@ -27,17 +27,17 @@
       <p class="muted">The WoW Forever folder you play from. It has the <b>Interface</b> and <b>WTF</b> folders inside.</p>
       <div class="pathbox"><div class="p" id="cand-path">Looking for WoW...</div><button type="button" class="btn" id="cand-change">Change...</button></div>
       <div class="status" id="cand-status"></div>
-      <label class="check" id="cand-install-row" hidden><input type="checkbox" id="cand-install" checked>Install Sterling Quest Tracker here too</label>
-      <div class="warn small-warn" id="game-warn" hidden><span class="dot bad"></span><div><div class="bad-t">Made for WoW Forever</div><div class="small">Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.</div></div></div>
+      <label class="check" id="cand-install-row" hidden><input type="checkbox" id="cand-install" checked>Install the Sterling Quest Sync add-on here too</label>
+      <div class="warn small-warn" id="game-warn" hidden><span class="dot bad"></span><div><div class="bad-t">Made for WoW Forever</div><div class="small">Sterling Quest Sync and the Companion are built and tested for WoW Forever. With another version of WoW they may not work as expected.</div></div></div>
       <p class="small muted" id="cand-others" hidden></p>
       <div class="otherlist" id="cand-list" hidden></div>
-      <p class="small muted">The app adds one small helper add-on called Sterling Quest Sync (and Sterling, if you tick the box). It never changes your game settings or any other add-on.</p>
+      <p class="small muted">The app adds one small add-on of its own, Sterling Quest Sync Companion (and Sterling Quest Sync, if you tick the box). It never changes your game settings or any other add-on.</p>
       <div class="row end"><button type="button" class="btn primary" id="folder-go" disabled>Continue</button></div>
     </section>
 
     <section class="step" id="step-first" hidden>
       <div class="eyebrow">STEP 2 OF 3</div>
-      <h1>Is this your first PC with Sterling Quest Sync?</h1>
+      <h1>Is this your first PC with the Companion?</h1>
       <div class="choices">
         <label class="choice framed"><input type="radio" name="first" value="yes" checked><span><span class="ct">Yes, this is my first PC</span><span class="cd">We'll make your account now. No email or password needed.</span></span></label>
         <label class="choice"><input type="radio" name="first" value="no"><span><span class="ct">No, I already use it on another PC</span><span class="cd">You'll enter a code from your other PC so both share one account.</span></span></label>
@@ -143,7 +143,7 @@
       </div>
     </div>
     <div class="microcard warnline" id="helper-card" hidden>
-      <span><b class="bad-t">WoW didn't load the helper add-on.</b> <span class="muted">Your progress can't reach the app. Exit WoW completely and start it again, then check Sterling Quest Sync is ticked in AddOns at character select.</span></span>
+      <span><b class="bad-t">WoW didn't load the Companion add-on.</b> <span class="muted">Your progress can't reach the app. Exit WoW completely and start it again, then check Sterling Quest Sync Companion is ticked in AddOns at character select.</span></span>
     </div>
     <div class="microcard" id="sterling-card" hidden>
       <span id="sterling-text"></span>
@@ -167,7 +167,7 @@
   </main>
 
   <main class="page" id="page-pair" hidden>
-    <div><h1>Pair a friend</h1><p class="muted">Friends who are already your partners in Sterling pair on their own, the next time you're both online in game. For anyone else, one of you makes a code and the other types it in. Nobody can find you or send you a request.</p></div>
+    <div><h1>Pair a friend</h1><p class="muted">Friends who are already your partners in Sterling Quest Sync pair on their own, the next time you're both online in game. For anyone else, one of you makes a code and the other types it in. Nobody can find you or send you a request.</p></div>
     <div class="grid">
       <section class="card framed col-gap">
         <h2>Give a code</h2>
@@ -214,23 +214,23 @@
       <label class="toggle"><span>Update this app automatically<span class="small muted block">Off: ask me when a new version is out</span></span><input type="checkbox" id="s-app-auto"></label>
       <div class="kv"><span>App version <b id="s-appver"></b><span class="small muted block" id="s-ver-note">Checks on its own every few hours.</span></span><span class="btns"><button type="button" class="btn small" id="s-check">Check for updates</button><button type="button" class="btn small" id="s-update" hidden>Update</button></span></div>
       <div class="upd" id="s-progress" hidden><span class="upd-step" id="s-step"></span><div class="bar"><div class="fill" id="s-fill"></div></div></div>
-      <label class="toggle"><span>Keep Sterling up to date<span class="small muted block" id="s-sterling"></span></span><input type="checkbox" id="s-sterling-auto"></label>
+      <label class="toggle"><span>Keep the Sterling Quest Sync add-on up to date<span class="small muted block" id="s-sterling"></span></span><input type="checkbox" id="s-sterling-auto"></label>
     </section>
     <section class="card">
       <h2>Game folder and safety</h2>
       <div class="kv"><span id="s-path" class="path"></span><button type="button" class="btn small" id="s-change">Change</button></div>
-      <p class="small muted">The app only changes its own helper add-on, Sterling (when it updates it) and its own data. It never changes your game settings (the WTF folder) or any other add-on.</p>
-      <div class="kv"><span>Backups of Sterling's saved data<span class="small muted block">Made before the app changes anything</span></span><button type="button" class="btn small" id="s-backups">Open folder</button></div>
+      <p class="small muted">The app only changes its own Companion add-on, the Sterling Quest Sync add-on (when it updates it) and its own data. It never changes your game settings (the WTF folder) or any other add-on.</p>
+      <div class="kv"><span>Backups of Sterling Quest Sync's saved data<span class="small muted block">Made before the app changes anything</span></span><button type="button" class="btn small" id="s-backups">Open folder</button></div>
     </section>
     <section class="card">
       <h2>Help</h2>
-      <div class="kv"><span>Something not working?<span class="small muted block">Copies the app's version, game folder type, add-on status and recent errors. No codes or account details. Paste it to whoever is helping you.</span></span><span class="btns"><button type="button" class="btn small" id="s-details">Copy details for help</button><button type="button" class="btn small ghost" data-open="help">Troubleshooting</button></span></div>
+      <div class="kv"><span>Something not working?<span class="small muted block">Copies what's needed to help: versions, add-on status, settings, sync status and recent activity. Names become Character 1 and Partner A, and no codes, realms or account details are included. Paste it to whoever is helping you.</span></span><span class="btns"><button type="button" class="btn small" id="s-details">Copy details for help</button><button type="button" class="btn small ghost" data-open="help">Troubleshooting</button></span></div>
     </section>
     <section class="card danger">
       <div><div class="dt">Delete my data</div><div class="small">Removes your account, PCs, pairings and copies from the server. Copies already on friends' PCs stay there.</div></div>
       <button type="button" class="btn bad" id="s-delete">Delete...</button>
     </section>
-    <div class="about"><span>Sterling Quest Sync <span id="s-ver"></span>. Built by Kael with the help of Claude Opus.</span><span><a href="#" data-open="help">Help</a> · <a href="#" data-open="privacy">Privacy</a> · <a href="#" data-open="repo">Source</a> · <a href="#" data-open="issues">Report a bug</a></span></div>
+    <div class="about"><span>Sterling Quest Sync Companion <span id="s-ver"></span>. Built by SterlingAddons with the help of Claude Opus.</span><span><a href="#" data-open="help">Help</a> · <a href="#" data-open="privacy">Privacy</a> · <a href="#" data-open="repo">Source</a> · <a href="#" data-open="issues">Report a bug</a></span></div>
   </main>
 </div>
 

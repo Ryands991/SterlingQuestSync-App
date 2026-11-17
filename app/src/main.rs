@@ -1,4 +1,4 @@
-//! Sterling Quest Sync desktop app: the window and the commands it can call.
+//! Sterling Quest Sync Companion desktop app: the window and the commands it can call.
 //!
 //! The web page has no file or shell access. It can only call the typed commands below, and it
 //! never hands the app a path: folders are picked in a native dialog on the Rust side and checked.
@@ -78,6 +78,9 @@ struct Settings {
     close_note_seen: bool,
     /// The version whose "What's new" was last seen. None on a fresh install.
     seen_version: Option<String>,
+    /// The Companion installed the add-on itself. Only then does it keep the add-on updated
+    /// when an add-on manager (WowUp, the CurseForge app) is on this PC, so the two don't fight.
+    sterling_by_app: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -107,6 +110,7 @@ impl Default for Settings {
             notify_favs: false,
             close_note_seen: false,
             seen_version: None,
+            sterling_by_app: false,
         }
     }
 }
@@ -167,6 +171,8 @@ struct Inner {
     candidate: Option<PathBuf>,
     /// When the server first stopped answering. Short blips aren't shown.
     offline_since: Option<i64>,
+    /// Add-on managers seen on this PC (WowUp, the CurseForge app).
+    managers: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -319,6 +325,8 @@ struct Status {
     close_note_seen: bool,
     /// WoW saved Sterling's data without the helper add-on: it isn't loaded.
     helper_off: bool,
+    /// Add-on managers on this PC, when one of them looks after the add-on instead of the Companion.
+    sterling_managed_by: Vec<String>,
     /// Notes for versions newer than the one last seen, shown once after an update.
     whats_new: Vec<(String, Vec<String>)>,
     last_sync: Option<i64>,
@@ -442,6 +450,7 @@ fn build_status(st: &AppState) -> Status {
         close_note_seen: s.close_note_seen,
         helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
         whats_new: whats_new(s.seen_version.as_deref()),
+        sterling_managed_by: if s.sterling_by_app { Vec::new() } else { inner.managers.clone() },
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
@@ -493,7 +502,7 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
             "_retail_" => "WoW Retail",
             other => other,
         };
-        inner.log(format!("Using your {game} folder. Added the app's helper add-on (Sterling Quest Sync)."), "");
+        inner.log(format!("Using your {game} folder. Added the Companion add-on (Sterling Quest Sync Companion)."), "");
     }
     if let Some(tx) = st.rewatch.lock().unwrap().as_ref() {
         let _ = tx.send(());
@@ -538,7 +547,7 @@ fn confirm_game(app: AppHandle, st: State<'_, AppState>, install_sterling: bool)
     let c = st.inner.lock().unwrap().candidate.clone().ok_or("Pick a game folder first.")?;
     set_game(&app, &st, c)?;
     if install_sterling {
-        install_sterling_now(&app).map_err(|e| format!("Your folder is set, but Sterling couldn't be installed: {e}. You can try again from Home."))?;
+        install_sterling_now(&app).map_err(|e| format!("Your folder is set, but Sterling Quest Sync couldn't be installed: {e}. You can try again from Home."))?;
     }
     Ok(())
 }
@@ -630,7 +639,7 @@ fn save_recovery_txt(app: AppHandle, st: State<'_, AppState>, code: String) -> R
     };
     let p = p.into_path().map_err(|e| e.to_string())?;
     let text = format!(
-        "Sterling Quest Sync recovery code\r\n\r\n{c}\r\n\r\nUse it when setting up the app again if no PC is left signed in.\r\nKeep it private: it lets someone use your sync account.\r\n"
+        "Sterling Quest Sync Companion recovery code\r\n\r\n{c}\r\n\r\nUse it when setting up the app again if no PC is left signed in.\r\nKeep it private: it lets someone use your sync account.\r\n"
     );
     let inner = st.inner.lock().unwrap();
     match &inner.session {
@@ -830,7 +839,7 @@ fn ensure_listed(st: &AppState, guid: &str) -> Result<(), String> {
     };
     match ch {
         Some(_) => Ok(()),
-        None => Err("Log in on that character once with Sterling and the SterlingQuestSync add-on enabled, then try again.".into()),
+        None => Err("Log in on that character once with Sterling Quest Sync and Sterling Quest Sync Companion enabled, then try again.".into()),
     }
 }
 
@@ -950,13 +959,17 @@ fn install_sterling(app: &AppHandle) -> Result<String, String> {
         let fresh = updater::installed_version(sess.fs.game()).is_none();
         updater::install(&sess.fs, &bytes, &rel.version).map_err(msg)?;
         inner.sterling_latest = Some(rel.version.clone());
+        if fresh {
+            inner.settings.sterling_by_app = true;
+            let _ = save_json("settings.json", &inner.settings);
+        }
         let running = inner.game_running;
         if running && fresh {
             inner.settings.restart_game = true;
             let _ = save_json("settings.json", &inner.settings);
         }
         let hint = if running && fresh { " Exit WoW completely and start it again to load it. /reload won't pick up a new add-on." } else if running { " Type /reload in game to load it." } else { "" };
-        inner.log(format!("{} Sterling {}.{}", if fresh { "Installed" } else { "Updated to" }, rel.version, hint), "good");
+        inner.log(format!("{} Sterling Quest Sync {}.{}", if fresh { "Installed" } else { "Updated to" }, rel.version, hint), "good");
     }
     emit_status(app);
     Ok(rel.version)
@@ -994,7 +1007,7 @@ fn install_app_update(app: &AppHandle) -> Result<(), String> {
             return Err("Already updating.".into());
         }
         inner.updating = Some(UpdateStep { step: "Getting ready".into(), percent: None });
-        inner.log("Updating Sterling Quest Sync...", "");
+        inner.log("Updating the Companion...", "");
     }
     emit_status(app);
     let result = tauri::async_runtime::block_on(async {
@@ -1176,6 +1189,17 @@ fn background(app: AppHandle) {
                 };
                 if let Some(f) = folder {
                     let running = game.running(&f);
+                    let found: Vec<String> = sqs_core::game::addon_managers(&mut game).into_iter().map(String::from).collect();
+                    let managers_changed = {
+                        let st = app.state::<AppState>();
+                        let mut inner = st.inner.lock().unwrap();
+                        let changed = inner.managers != found;
+                        inner.managers = found;
+                        changed
+                    };
+                    if managers_changed {
+                        emit_status(&app);
+                    }
                     let (was, cleared) = {
                         let st = app.state::<AppState>();
                         let mut inner = st.inner.lock().unwrap();
@@ -1202,7 +1226,13 @@ fn background(app: AppHandle) {
                         }
                         if let Some(latest) = check_sterling_quiet(&app) {
                             let installed = updater::installed_version(&f);
-                            if auto_sterling && installed.as_deref().is_some_and(|i| updater::newer(&latest, i)) {
+                            // Leave the add-on to WowUp or the CurseForge app when they look after it.
+                            let ours = {
+                                let st = app.state::<AppState>();
+                                let inner = st.inner.lock().unwrap();
+                                inner.settings.sterling_by_app || inner.managers.is_empty()
+                            };
+                            if auto_sterling && ours && installed.as_deref().is_some_and(|i| updater::newer(&latest, i)) {
                                 let _ = install_sterling(&app);
                             }
                         }
@@ -1232,10 +1262,11 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
 const WHATS_NEW: &[(&str, &[&str])] = &[(
     "0.1.24",
     &[
-        "The app notices when WoW didn't load its helper add-on and tells you how to fix it.",
-        "Invite a friend who doesn't have the app from their row on the Partners page.",
+        "New names: the add-on is now Sterling Quest Sync, and this app is its Companion.",
+        "The app notices when WoW didn't load the Companion add-on and tells you how to fix it.",
+        "If WowUp or the CurseForge app keeps the add-on updated, the Companion leaves it to them.",
         "New in Settings: Start with Windows, favourite notifications and Copy details for help.",
-        "The window remembers its size and spot, and hints say /reload or log in to match the game.",
+        "Invite a friend who doesn't have the app from their row on the Partners page.",
     ],
 )];
 
@@ -1314,29 +1345,181 @@ fn notify_favourites(app: &AppHandle, r: &Report) {
     let _ = app.notification().builder().title(title).body(how).show();
 }
 
-/// Plain facts for a help request. No codes, keys or account IDs.
+/// Facts for a help request, with nothing that identifies anyone: character and partner names
+/// become "Character 1" and "Partner A", no realms, GUIDs, codes, keys, account or PC names, and
+/// the Windows user folder becomes %USERPROFILE%.
 #[tauri::command]
 fn support_details(st: State<'_, AppState>) -> String {
     let status = build_status(&st);
     let inner = st.inner.lock().unwrap();
+    let ago = |t: Option<i64>| match t {
+        None => "never".to_string(),
+        Some(t) => {
+            let m = (now() - t).max(0) / 60;
+            if m < 1 { "just now".into() } else if m < 120 { format!("{m} min ago") } else if m < 48 * 60 { format!("{} hrs ago", m / 60) } else { format!("{} days ago", m / 1440) }
+        }
+    };
+    let yn = |b: bool| if b { "yes" } else { "no" };
+
+    // Every name the app knows, mapped to a placeholder. Longest first so "Bran Ashvale" goes before "Bran".
+    let mut names: Vec<(String, String)> = Vec::new();
+    for (i, c) in status.characters.iter().enumerate() {
+        names.push((c.name.clone(), format!("Character {}", i + 1)));
+        if let Some(n) = c.look.nick.clone() { names.push((n, format!("Character {}", i + 1))); }
+    }
+    let mut letter = 0u8;
+    let mut partner_label = |n: &str, names: &mut Vec<(String, String)>| -> String {
+        if let Some((_, l)) = names.iter().find(|(k, _)| k == n) { return l.clone(); }
+        let l = format!("Partner {}", (b'A' + (letter % 26)) as char);
+        letter += 1;
+        names.push((n.to_string(), l.clone()));
+        l
+    };
+    for c in &status.characters {
+        for p in &c.partners {
+            let l = partner_label(&p.name, &mut names);
+            if let Some(n) = p.look.nick.clone() { names.push((n, l)); }
+        }
+        for u in &c.unpaired {
+            if let Some(name) = u.name.as_deref().filter(|n| !n.is_empty()) {
+                let l = partner_label(name, &mut names);
+                if let Some(n) = u.look.nick.clone() { names.push((n, l)); }
+            }
+        }
+    }
+    for n in inner.names().values() { partner_label(n, &mut names); }
+    names.retain(|(k, _)| k.chars().count() >= 2);
+    names.sort_by_key(|(k, _)| std::cmp::Reverse(k.len()));
+    let profile = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+    let pc = status.pc_label.clone();
+    let clean = |text: &str| anonymise(text, &names, &profile, &pc);
+
+    let mut out = String::new();
+    let mut line = |k: &str, v: String| out.push_str(&format!("{k}: {v}\n"));
+    line("Companion app", VERSION.to_string());
+    line("Windows", windows_version());
+    line("Game folder type", status.game.as_ref().map(|g| g.flavour.clone()).unwrap_or_else(|| "not set".into()));
+    line("WoW running", yn(status.game_running).into());
+    line("Restart of WoW pending", yn(status.restart_game).into());
+    line("Companion add-on installed", yn(status.companion_installed).into());
+    line("Companion add-on loaded by WoW", if status.helper_off { "NO, the game saved without it".into() } else { "yes, or not known yet".into() });
+    line("Sterling Quest Sync add-on", match (&status.sterling_version, &status.sterling_latest) {
+        (None, _) => "not installed".into(),
+        (Some(v), Some(l)) if l != v => format!("{v} (newest is {l})"),
+        (Some(v), _) => format!("{v} (newest)"),
+    });
+    line("Add-on managers on this PC", if inner.managers.is_empty() { "none seen".into() } else { inner.managers.join(", ") });
+    line("Add-on installed by the Companion", yn(inner.settings.sterling_by_app).into());
+    line("Settings", format!(
+        "sync automatically {}, keep add-on updated {}, update app automatically {}, close to tray {}, start with Windows {}, favourite notifications {}",
+        yn(status.auto_sync), yn(status.auto_update_sterling), yn(status.auto_update_app), yn(status.close_to_tray), yn(status.start_with_windows), yn(status.notify_favs)
+    ));
+    line("Sync server", match status.online { Some(true) => "reachable".into(), Some(false) => "can't reach it".into(), None => "not checked yet".into() });
+    line("Custom server", yn(inner.settings.server != api::DEFAULT_SERVER).into());
+    line("Last sync", ago(status.last_sync));
+    line("Last error", status.last_error.as_deref().map(|e| clean(e)).unwrap_or_else(|| "none".into()));
+    line("Characters", status.characters.len().to_string());
+    for (i, c) in status.characters.iter().enumerate() {
+        let active = c.partners.iter().filter(|p| p.active).count();
+        let waiting = c.partners.iter().filter(|p| p.active && p.last_copy.is_some() && !p.applied).count();
+        let no_copy = c.partners.iter().filter(|p| p.active && p.last_copy.is_none()).count();
+        let ended = c.partners.iter().filter(|p| !p.active).count();
+        let app_no = c.unpaired.iter().filter(|u| u.app == "no").count();
+        let app_yes = c.unpaired.len() - app_no;
+        out.push_str(&format!(
+            "  Character {}: level {}, add-on {}, last save {}, waiting to sync {}, paired {} (new copy not loaded yet {}, no copy yet {}, ended {}), not paired yet {} (have the app or unknown {}, no app {}), favourites {}\n",
+            i + 1,
+            c.look.level.map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+            c.sterling.clone().unwrap_or_else(|| "?".into()),
+            ago(c.saved),
+            yn(c.ready),
+            active, waiting, no_copy, ended,
+            c.unpaired.len(), app_yes, app_no,
+            c.favs.len()
+        ));
+    }
+    out.push_str("Recent activity (newest first):\n");
+    let recent: Vec<&Activity> = inner.activity.iter().take(12).collect();
+    if recent.is_empty() { out.push_str("  none\n"); }
+    for a in recent {
+        out.push_str(&format!("  {} {}\n", ago(Some(a.t)), clean(&a.text)));
+    }
+    out.push_str("Crash log (newest first):\n");
     let crash = fs::read_to_string(app_data().join("crash.log")).unwrap_or_default();
-    let crash_tail: Vec<&str> = crash.lines().rev().take(5).collect();
-    let recent: Vec<String> = inner.activity.iter().take(8).map(|a| format!("  {} {}", a.t, a.text)).collect();
-    format!(
-        "Sterling Quest Sync {}\nWindows: {}\nGame folder: {}\nGame open: {}\nHelper add-on installed: {}\nHelper add-on loaded by WoW: {}\nSterling: {}\nCharacters: {}\nServer: {}\nLast error: {}\nRecent activity:\n{}\nCrash log (newest first):\n{}\n",
-        VERSION,
-        std::env::consts::OS,
-        status.game.as_ref().map(|g| g.flavour.as_str()).unwrap_or("not set"),
-        if status.game_running { "yes" } else { "no" },
-        if status.companion_installed { "yes" } else { "no" },
-        if status.helper_off { "NO (WoW saved without it)" } else { "yes, or not known yet" },
-        status.sterling_version.as_deref().unwrap_or("not installed"),
-        status.characters.len(),
-        match status.online { Some(true) => "online", Some(false) => "can't reach it", None => "not checked yet" },
-        status.last_error.as_deref().unwrap_or("none"),
-        if recent.is_empty() { "  none".to_string() } else { recent.join("\n") },
-        if crash_tail.is_empty() { "  none".to_string() } else { crash_tail.iter().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n") },
-    )
+    let tail: Vec<&str> = crash.lines().rev().take(5).collect();
+    if tail.is_empty() { out.push_str("  none\n"); }
+    for l in tail { out.push_str(&format!("  {}\n", clean(l))); }
+    out.push_str("(Names are replaced with Character 1, Partner A and so on. No codes, keys, account details or realms are included.)\n");
+    out
+}
+
+/// Replaces the user folder, the PC's label and every known name (longest first) with placeholders.
+fn anonymise(text: &str, names: &[(String, String)], profile: &str, pc: &str) -> String {
+    let mut t = text.to_string();
+    if profile.len() > 3 {
+        t = t.replace(profile, "%USERPROFILE%");
+    }
+    if pc.len() > 1 {
+        t = t.replace(pc, "[this PC]");
+    }
+    for (k, v) in names {
+        t = replace_whole(&t, k, v);
+    }
+    t
+}
+
+/// Replaces `from` only where it stands as a whole name, so "Ty" doesn't touch "Type".
+fn replace_whole(text: &str, from: &str, to: &str) -> String {
+    let is_word = |c: char| c.is_alphanumeric();
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(from) {
+        let before = rest[..i].chars().next_back();
+        let after = rest[i + from.len()..].chars().next();
+        let whole = !before.is_some_and(is_word) && !after.is_some_and(is_word);
+        out.push_str(&rest[..i]);
+        out.push_str(if whole { to } else { from });
+        rest = &rest[i + from.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(test)]
+mod support_tests {
+    use super::anonymise;
+
+    #[test]
+    fn details_hide_names_paths_and_pc() {
+        let mut names = vec![
+            ("Bran".to_string(), "Partner A".to_string()),
+            ("Bran Ashvale".to_string(), "Partner A".to_string()),
+            ("Kaelith Emberfall".to_string(), "Character 1".to_string()),
+        ];
+        names.sort_by_key(|(k, _)| std::cmp::Reverse(k.len()));
+        let out = anonymise(
+            "Got Bran Ashvale's latest copy for Kaelith Emberfall; Bran says hi; C:\\Users\\someone\\AppData on GAMING-PC",
+            &names,
+            "C:\\Users\\someone",
+            "GAMING-PC",
+        );
+        assert_eq!(out, "Got Partner A's latest copy for Character 1; Partner A says hi; %USERPROFILE%\\AppData on [this PC]");
+        let ty = vec![("Ty".to_string(), "Partner B".to_string())];
+        assert_eq!(anonymise("Type /reload. Ty paired.", &ty, "", ""), "Type /reload. Partner B paired.");
+    }
+}
+
+/// "Windows 11 (10.0.26100)" style text, best effort.
+fn windows_version() -> String {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Ok(o) = std::process::Command::new("cmd").args(["/C", "ver"]).creation_flags(0x0800_0000).output() {
+            let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if !t.is_empty() { return t; }
+        }
+    }
+    std::env::consts::OS.to_string()
 }
 
 #[tauri::command]
@@ -1431,16 +1614,16 @@ fn crash_log(text: &str) {
 
 /// The window couldn't open. Says why in a plain Windows message instead of quitting silently.
 fn startup_failed(err: &str) {
-    let mut text = format!("Sterling Quest Sync couldn't open.\n\n{err}\n\n");
+    let mut text = format!("Sterling Quest Sync Companion couldn't open.\n\n{err}\n\n");
     if err.to_lowercase().contains("webview") {
-        text.push_str("This PC is missing Microsoft Edge WebView2, which the app needs to show its window. Download the free Evergreen installer from https://developer.microsoft.com/microsoft-edge/webview2/, run it, then open Sterling Quest Sync again.\n\n");
+        text.push_str("This PC is missing Microsoft Edge WebView2, which the app needs to show its window. Download the free Evergreen installer from https://developer.microsoft.com/microsoft-edge/webview2/, run it, then open Sterling Quest Sync Companion again.\n\n");
     }
     text.push_str("The details are saved in %APPDATA%\\SterlingQuestSync\\crash.log. To get help, email that file to support@sterlingaddons.com or open an issue on GitHub.");
     #[cfg(windows)]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
         let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let (t, c) = (w(&text), w("Sterling Quest Sync"));
+        let (t, c) = (w(&text), w("Sterling Quest Sync Companion"));
         unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONERROR) };
     }
     #[cfg(not(windows))]
@@ -1480,6 +1663,7 @@ fn main() {
             updating: None,
             candidate: None,
             offline_since: None,
+            managers: Vec::new(),
         }),
         keys: Arc::new(SystemStore),
         rewatch: Mutex::new(None),
@@ -1530,11 +1714,11 @@ fn main() {
                     let _ = save_json("settings.json", &inner.settings);
                 }
             }
-            let open = MenuItem::with_id(app, "open", "Open Sterling Quest Sync", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open Sterling Quest Companion", true, None::<&str>)?;
             let sync = MenuItem::with_id(app, "sync", "Sync now", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &sync, &quit])?;
-            let mut tray = TrayIconBuilder::with_id("main").tooltip(format!("Sterling Quest Sync v{VERSION}")).menu(&menu).show_menu_on_left_click(false);
+            let mut tray = TrayIconBuilder::with_id("main").tooltip(format!("Sterling Quest Companion v{VERSION}")).menu(&menu).show_menu_on_left_click(false);
             if let Some(icon) = app.default_window_icon() {
                 tray = tray.icon(icon.clone());
             }

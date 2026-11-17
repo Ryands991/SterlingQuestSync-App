@@ -1,4 +1,4 @@
-// Sterling Quest Sync window. Every value from the server or the game is shown with textContent,
+// Sterling Quest Sync Companion window. Every value from the server or the game is shown with textContent,
 // never as HTML. The page can only call the app's own typed commands.
 "use strict";
 
@@ -58,7 +58,7 @@ async function copy(text, done) {
 }
 function inviteText() {
   return [
-    "Want our quests to sync even when we play at different times? Get the Sterling Quest Sync app (free, Windows):",
+    "Want our quests to sync even when we play at different times? Get the Sterling Quest Sync Companion app (free, Windows, optional):",
     "https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest",
     "",
     "1. Download SterlingQuestSync_<version>_x64-setup.exe and run it. If Windows says \"Windows protected your PC\", click More info, then Run anyway.",
@@ -157,7 +157,7 @@ function showCandidate(g) {
   const st = $("cand-status"); st.replaceChildren();
   const forever = g.flavour === "_forever_";
   st.append(statusLine(forever ? "good" : "bad", FLAVOURS[g.flavour] || "Game folder: " + g.flavour));
-  st.append(g.sterling_version ? statusLine("good", "Sterling " + g.sterling_version + " installed") : statusLine("", "Sterling isn't installed here"));
+  st.append(g.sterling_version ? statusLine("good", "Sterling Quest Sync " + g.sterling_version + " installed") : statusLine("", "Sterling Quest Sync isn't installed here"));
   const n = g.accounts.length;
   st.append(n ? statusLine("good", n + (n === 1 ? " WoW account found" : " WoW accounts found")) : statusLine("", "No WoW accounts yet. That's fine, log in once later."));
   $("cand-install-row").hidden = !!g.sterling_version;
@@ -249,17 +249,17 @@ function renderHome(c) {
     dot.className = "dot";
     if (!S.companion_installed) {
       $("h-title").textContent = "Helper add-on missing";
-      $("h-line").textContent = "The app's helper add-on (Sterling Quest Sync) isn't in your AddOns folder. In Settings, pick your game folder again to put it back, then restart WoW.";
+      $("h-line").textContent = "The Companion add-on (Sterling Quest Sync Companion) isn't in your AddOns folder. In Settings, pick your game folder again to put it back, then restart WoW.";
     } else if (!S.sterling_version) {
-      $("h-title").textContent = "Sterling isn't installed";
-      $("h-line").textContent = "This app works with the Sterling Quest Tracker add-on. Click Install below, then restart WoW and log in.";
+      $("h-title").textContent = "Sterling Quest Sync isn't installed";
+      $("h-line").textContent = "This app works with the Sterling Quest Sync add-on. Click Install below, then restart WoW and log in.";
     } else if (S.helper_off) {
-      $("h-title").textContent = "WoW didn't load the helper add-on";
+      $("h-title").textContent = "WoW didn't load the Companion add-on";
       dot.className = "dot bad";
-      $("h-line").textContent = "The game saved, but the app's helper add-on (Sterling Quest Sync) wasn't running, so nothing reached the app.";
+      $("h-line").textContent = "The game saved, but the Companion add-on (Sterling Quest Sync Companion) wasn't running, so nothing reached the app.";
       steps([
         "Exit WoW completely. /reload won't load a new add-on.",
-        "Start WoW. At character select, click AddOns and make sure Sterling Quest Sync is ticked.",
+        "Start WoW. At character select, click AddOns and make sure Sterling Quest Sync Companion is ticked.",
         "Log in, then /reload or log out. Your character shows up here.",
       ], "To fix it:");
     } else if (S.restart_game && S.game_running) {
@@ -276,7 +276,7 @@ function renderHome(c) {
       $("h-line").textContent = "Log in to WoW and your characters show up here.";
       steps([
         "Exit WoW completely and start it again. New add-ons only load when the game starts.",
-        "At character select, click AddOns and make sure Sterling and Sterling Quest Sync are both ticked.",
+        "At character select, click AddOns and make sure Sterling Quest Sync and Sterling Quest Sync Companion are both ticked.",
         "Log in, then type /reload. Your character shows up when the game saves.",
         "Still nothing? In Settings, check the game folder is the WoW Forever folder you play from.",
       ], "Not showing up?");
@@ -286,7 +286,7 @@ function renderHome(c) {
     if (S.busy) { $("h-title").textContent = "Syncing..."; dot.className = "dot gold"; $("h-line").textContent = "Talking to the server."; }
     else if (S.last_error) { $("h-title").textContent = "Couldn't sync"; dot.className = "dot bad"; $("h-line").textContent = S.last_error; }
     else if (c.ready) { $("h-title").textContent = "Ready to sync"; dot.className = "dot gold"; $("h-line").textContent = "New progress from " + ago(c.saved) + (S.auto_sync ? ". Sharing it on its own." : ". Click Sync now to share it."); }
-    else { $("h-title").textContent = "Up to date"; dot.className = "dot good"; $("h-line").textContent = c.saved ? "Your partners have your latest progress (saved " + ago(c.saved) + ")." : "Play with Sterling on, then /reload or log out to share your progress."; }
+    else { $("h-title").textContent = "Up to date"; dot.className = "dot good"; $("h-line").textContent = c.saved ? "Your partners have your latest progress (saved " + ago(c.saved) + ")." : "Play with Sterling Quest Sync on, then /reload or log out to share your progress."; }
   }
   $("h-last").textContent = S.last_sync ? "Last synced " + ago(S.last_sync) : "Not synced yet";
 
@@ -296,11 +296,11 @@ function renderHome(c) {
   progress("app", up);
   if (up) {
     ac.hidden = false;
-    $("app-text").replaceChildren(el("b", "", "Updating Sterling Quest Sync"), el("span", "muted", av ? " to " : ""), el("b", "good-t", av || ""));
+    $("app-text").replaceChildren(el("b", "", "Updating the Companion"), el("span", "muted", av ? " to " : ""), el("b", "good-t", av || ""));
     $("app-update").hidden = true;
   } else if (av) {
     ac.hidden = false;
-    $("app-text").replaceChildren(el("span", "muted", "App update: "), el("b", "", "Sterling Quest Sync "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
+    $("app-text").replaceChildren(el("span", "muted", "App update: "), el("b", "", "Companion "), el("span", "muted", S.version + " to "), el("b", "good-t", av));
     $("app-update").hidden = false; // the install finds and checks the signed update itself
   } else ac.hidden = true;
 
@@ -310,20 +310,24 @@ function renderHome(c) {
   const v = S.sterling_version, l = S.sterling_latest;
   if (!v && S.game) {
     card.hidden = false;
-    $("sterling-text").replaceChildren(el("b", "", "Sterling Quest Tracker "), el("span", "muted", "isn't installed in this game folder"));
+    $("sterling-text").replaceChildren(el("b", "", "Sterling Quest Sync "), el("span", "muted", "isn't installed in this game folder"));
     $("sterling-update").textContent = "Install";
   } else if (v && l && newer(l, v)) {
     card.hidden = false;
-    $("sterling-text").replaceChildren(el("span", "muted", "Add-on update: "), el("b", "", "Sterling "), el("span", "muted", v + " to "), el("b", "good-t", l));
+    const mgr = (S.sterling_managed_by || [])[0];
+    $("sterling-text").replaceChildren(el("span", "muted", "Add-on update: "), el("b", "", "Sterling Quest Sync "), el("span", "muted", v + " to "), el("b", "good-t", l), mgr ? el("span", "muted", ". Ready in " + mgr + ".") : "");
     $("sterling-update").textContent = "Update";
+    // WowUp or the CurseForge app looks after the add-on: point there instead of updating it here.
+    $("sterling-update").hidden = !!mgr;
   } else card.hidden = true;
+  if (card.hidden || !(v && l && newer(l, v))) $("sterling-update").hidden = false;
 
   // Same rows as the Partners page: favourites (up to 5), or the first few until some are starred.
   const hp = $("h-partners"); hp.replaceChildren();
   const all = c ? partnerRows(c) : [];
   const favs = all.filter((r) => r.fav);
   if (!all.length) {
-    hp.append(el("div", "empty", c ? "No partners yet. Partners you add in Sterling show up here." : "Select a character to start."));
+    hp.append(el("div", "empty", c ? "No partners yet. Partners you add in Sterling Quest Sync show up here." : "Select a character to start."));
     if (c) { const b = el("button", "btn small", "Pair a friend"); b.type = "button"; b.onclick = () => go("pair"); hp.append(b); }
   } else {
     const box = el("div", "plist flat");
@@ -429,7 +433,7 @@ function partnerRows(c) {
       menu: async () => {
         const who = (u.look && u.look.nick) || u.name || "Sterling partner";
         if (u.app === "no") {
-          const v = await dialog(who, [para("You still sync live in game when you're both online. To sync when you play at different times, they need the Sterling Quest Sync app. Once they have it, the apps pair on their own the next time you're both online.", "muted"), para("Copy an invite with the download link and the setup steps, then paste it to them.", "small muted")], [["Close", false, "ghost"], ["Copy invite", "invite", "primary"]]);
+          const v = await dialog(who, [para("You still sync live in game when you're both online. To sync when you play at different times, they need the Sterling Quest Sync Companion app. Once they have it, the apps pair on their own the next time you're both online.", "muted"), para("Copy an invite with the download link and the setup steps, then paste it to them.", "small muted")], [["Close", false, "ghost"], ["Copy invite", "invite", "primary"]]);
           if (v === "invite") copy(inviteText(), "Invite copied. Paste it to " + who + ".");
           return;
         }
@@ -469,7 +473,7 @@ function renderPartners(c) {
   if (!c) { body.append(el("div", "empty", "Select a character to start.")); return; }
   const linked = c.partners.filter((p) => p.active).length;
   const inSterling = c.unpaired.length + linked;
-  $("p-sub").append(inSterling ? linked + " of " + inSterling + " Sterling partners also sync through the app. Star up to 5 favourites to keep them on top, here and in game." : "No partners yet. Add partners in Sterling in game, or pair a friend here with a code.");
+  $("p-sub").append(inSterling ? linked + " of " + inSterling + " add-on partners also sync through the app. Star up to 5 favourites to keep them on top, here and in game." : "No partners yet. Add partners in Sterling Quest Sync in game, or pair a friend here with a code.");
 
   const look = c.look || {};
   const race = [look.race, CLASS_NAMES[look.class]].filter(Boolean).join(" ");
@@ -481,7 +485,7 @@ function renderPartners(c) {
   }));
 
   const rows = partnerRows(c);
-  if (!rows.length) body.append(el("div", "empty", "No partners yet. Partners you add in Sterling show up here, or pair a friend with a code."));
+  if (!rows.length) body.append(el("div", "empty", "No partners yet. Partners you add in Sterling Quest Sync show up here, or pair a friend with a code."));
   for (const r of rows) body.append(prow(r.opts));
 }
 
@@ -565,7 +569,10 @@ function renderSettings() {
   $("s-tray").checked = S.close_to_tray;
   $("s-startup").checked = S.start_with_windows;
   $("s-notify").checked = S.notify_favs;
-  $("s-sterling").textContent = S.sterling_version ? "You have " + S.sterling_version + ". Updates install for you, and the old version is kept as a backup." : "Sterling isn't installed in this game folder.";
+  const mgrs = S.sterling_managed_by || [];
+  $("s-sterling").textContent = !S.sterling_version ? "Sterling Quest Sync isn't installed in this game folder."
+    : mgrs.length ? "You have " + S.sterling_version + ". " + mgrs.join(" or ") + " is on this PC, so updates are left to it and the Companion just tells you when one is out."
+    : "You have " + S.sterling_version + ". Updates install for you, and the old version is kept as a backup.";
   $("s-path").textContent = S.game_path || "Not set";
   if (!pcsLoaded) loadPcs();
 }
@@ -577,7 +584,7 @@ function go(p) { page = p; if (p === "settings") pcsLoaded = false; renderApp();
 $("win-min").onclick = () => T.window.getCurrentWindow().minimize().catch(fail);
 $("win-close").onclick = async () => {
   if (S && S.close_to_tray && !S.close_note_seen && !S.setup_needed) {
-    const v = await dialog("Still running in the tray", [para("Sterling Quest Sync keeps syncing in the background. Find it by the clock, and quit any time from its tray icon.", "muted"), para("You can change what the close button does in Settings.", "small muted")], [["Quit instead", "quit", "ghost"], ["Got it", "tray", "primary"]]);
+    const v = await dialog("Still running in the tray", [para("The Companion keeps syncing in the background. Find it by the clock, and quit any time from its tray icon.", "muted"), para("You can change what the close button does in Settings.", "small muted")], [["Quit instead", "quit", "ghost"], ["Got it", "tray", "primary"]]);
     if (!v) return;
     await call("set_options", { closeNoteSeen: true }).catch(() => {});
     if (v === "quit") return call("quit");
@@ -598,13 +605,13 @@ for (const r of document.querySelectorAll("input[name=first]")) r.addEventListen
 const OTHER_WOW = ["_classic_era_", "_classic_", "_anniversary_", "_retail_", "_ptr_", "_beta_", "_classic_ptr_", "_xptr_"];
 async function warnIfNotForever(g) {
   if (g && OTHER_WOW.includes(g.flavour)) {
-    await dialog("Made for WoW Forever", [para("You picked " + (FLAVOURS[g.flavour] || g.flavour) + ". Sterling Quest Sync and Sterling are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
+    await dialog("Made for WoW Forever", [para("You picked " + (FLAVOURS[g.flavour] || g.flavour) + ". Sterling Quest Sync and the Companion are built and tested for WoW Forever. With another version of WoW they may not work as expected.", "muted"), para("You can switch back any time in Settings, under Game folder.", "small muted")], [["OK", true, "primary"]]);
   }
 }
 $("cand-change").onclick = () => busy($("cand-change"), async () => { const g = await call("candidate_pick"); if (g) showCandidate(g); });
 $("folder-go").onclick = () => busy($("folder-go"), async () => {
   const install = !$("cand-install-row").hidden && $("cand-install").checked;
-  if (install) $("folder-go").textContent = "Installing Sterling...";
+  if (install) $("folder-go").textContent = "Installing Sterling Quest Sync...";
   try { await call("confirm_game", { installSterling: install }); } finally { $("folder-go").textContent = "Continue"; }
   if (S.game_running) toast("WoW is open. Exit it completely and start it again so it finds the new add-on.");
   setupStep = "first";
@@ -675,14 +682,14 @@ $("s-check").onclick = () => busy($("s-check"), async () => {
 });
 
 async function askUpdate(btn) {
-  const ok = await dialog("Update Sterling Quest Sync?", [para("The app closes for a few seconds, installs version " + appAvail() + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
+  const ok = await dialog("Update the Companion?", [para("The app closes for a few seconds, installs version " + appAvail() + " and opens again. Your settings and partners stay.", "muted")], [["Not now", false, "ghost"], ["Update", true, "primary"]]);
   if (ok) busy(btn, () => call("update_app"));
 }
 $("app-update").onclick = () => askUpdate($("app-update"));
 $("s-update").onclick = () => askUpdate($("s-update"));
 $("s-sterling-auto").onchange = (e) => call("set_options", { autoUpdateSterling: e.target.checked }).catch(fail);
 $("char").onchange = (e) => call("set_options", { character: e.target.value }).catch(fail);
-$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling " + v + " installed" + (S.game_running ? (S.restart_game ? ". Exit WoW completely and start it again to load it." : ". Type /reload in game to load it.") : "")); });
+$("sterling-update").onclick = () => busy($("sterling-update"), async () => { const v = await call("update_sterling"); toast("Sterling Quest Sync " + v + " installed" + (S.game_running ? (S.restart_game ? ". Exit WoW completely and start it again to load it." : ". Type /reload in game to load it.") : "")); });
 
 $("gen").onclick = () => makeCode($("gen"));
 $("gen2").onclick = () => makeCode($("gen2"));
@@ -705,7 +712,7 @@ $("check-code").onclick = () => busy($("check-code"), async () => {
 
 $("link-pc").onclick = () => busy($("link-pc"), async () => {
   const r = await call("link_code");
-  await dialog("Link another PC", [para("On the other PC, install Sterling Quest Sync and choose \"No, I already use it on another PC\". Type this code there.", "muted"), codeBox(r.code), para("Lasts 10 minutes and works once.", "small muted")], [["Done", true, "primary"]]);
+  await dialog("Link another PC", [para("On the other PC, install Sterling Quest Sync Companion and choose \"No, I already use it on another PC\". Type this code there.", "muted"), codeBox(r.code), para("Lasts 10 minutes and works once.", "small muted")], [["Done", true, "primary"]]);
   pcsLoaded = false; renderApp();
 });
 $("new-rec").onclick = async () => {

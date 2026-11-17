@@ -458,7 +458,7 @@ fn check_inbox(inbox: &Inbox) -> Result<()> {
 pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String> {
     check_inbox(inbox)?;
     let mut s = String::new();
-    s.push_str("-- Written by the Sterling Quest Sync app. Do not edit; it is replaced on every sync.\n");
+    s.push_str("-- Written by the Sterling Quest Sync Companion app. Do not edit; it is replaced on every sync.\n");
     s.push_str("SterlingQuestSync_Inbox = {\n");
     s.push_str(&format!("  format = {},\n  written = {},\n", FORMAT, written));
     if let Some(a) = &inbox.app {
@@ -524,8 +524,8 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String> {
 pub fn companion_toc() -> String {
     [
         "## Interface: 16001, 11509",
-        "## Title: Sterling Quest Sync",
-        "## Notes: Lets Sterling and the Sterling Quest Sync app share quest progress. Keep this enabled.",
+        "## Title: Sterling Quest Sync Companion",
+        "## Notes: Part of the optional Sterling Quest Sync Companion app. Passes quest progress between the add-on and the app. Keep this enabled while you use the app.",
         "## Author: SterlingAddons",
         "## IconTexture: Interface\\AddOns\\SterlingQuestSync\\icon",
         "## Version: 1",

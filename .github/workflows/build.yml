@@ -34,12 +34,12 @@ jobs:
           name: SterlingQuestSync-windows
           path: out/*.exe
           if-no-files-found: error
-      # Releases start as drafts. Kael signs the installer on his own PC (the signing key never
+      # Releases start as drafts. The owner signs the installer on their own PC (the signing key never
       # touches GitHub), then the signature and latest.json are added and the draft is published.
       - name: Draft release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          name: Sterling Quest Sync ${{ github.ref_name }}
+          name: Sterling Quest Sync Companion ${{ github.ref_name }}
           files: out/*.exe

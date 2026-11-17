@@ -41,6 +41,49 @@ impl GameCheck {
     }
 }
 
+/// Add-on managers found on this PC, by friendly name: running now, or installed in their usual
+/// folders. Only names are looked at; nothing of theirs is read.
+pub fn addon_managers(check: &mut GameCheck) -> Vec<&'static str> {
+    let mut found: Vec<&'static str> = Vec::new();
+    let mut add = |n: &'static str| {
+        if !found.contains(&n) {
+            found.push(n);
+        }
+    };
+    if let Some(sys) = check.sys.as_mut() {
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+        for p in sys.processes().values() {
+            let name = p.name().to_string_lossy().to_lowercase();
+            if name.starts_with("wowup") {
+                add("WowUp");
+            } else if name.starts_with("curseforge") {
+                add("the CurseForge app");
+            }
+        }
+    }
+    for base in [dirs_local(), dirs_roaming()].into_iter().flatten() {
+        for sub in [base.join("Programs"), base.clone()] {
+            let Ok(rd) = std::fs::read_dir(&sub) else { continue };
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                if n.starts_with("wowup") {
+                    add("WowUp");
+                } else if n.starts_with("curseforge") {
+                    add("the CurseForge app");
+                }
+            }
+        }
+    }
+    found
+}
+
+fn dirs_local() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+}
+fn dirs_roaming() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(PathBuf::from)
+}
+
 /// Sends the account folder name whenever the companion's outbox file changes on disk.
 pub struct SaveWatcher {
     _w: RecommendedWatcher,

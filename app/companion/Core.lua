@@ -1,5 +1,5 @@
--- Sterling Quest Sync companion. Installed and kept up to date by the Sterling Quest Sync app.
--- Inbox.lua (written by the app) sets SterlingQuestSync_Inbox. Sterling Quest Tracker reads it
+-- Sterling Quest Sync Companion add-on. Installed and kept up to date by the Sterling Quest Sync Companion app.
+-- Inbox.lua (written by the app) sets SterlingQuestSync_Inbox. Sterling Quest Sync reads it
 -- and writes outgoing copies into SterlingQuestSyncOut at logout. This file only makes sure both exist.
 
 local f = CreateFrame("Frame")
