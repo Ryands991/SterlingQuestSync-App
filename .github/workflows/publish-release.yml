@@ -1,0 +1,89 @@
+# Finishes a release as github-actions[bot], so no person's account shows on it.
+#
+# The Build workflow makes the draft release (with the installer) when a version tag is pushed.
+# The owner signs the installer on their own PC, then runs this with the signature and latest.json
+# passed in as base64 text. This job attaches them, re-uploads every other file of the release as
+# the bot too, and publishes it as the latest release.
+#
+# Run with no signature files on an older release to re-upload its files as the bot.
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.1.24"
+        required: true
+      sig_b64:
+        description: "The installer's .sig file, base64 (leave empty to keep what's there)"
+        required: false
+        default: ""
+      latest_b64:
+        description: "latest.json, base64 (leave empty to keep what's there)"
+        required: false
+        default: ""
+      publish:
+        description: "Publish the draft and mark it latest"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check the tag
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a version tag: $TAG"; exit 1; }
+          gh release view "$TAG" --json tagName,isDraft,author --jq '"Release \(.tagName), draft: \(.isDraft), made by \(.author.login)"'
+
+      - name: Keep a copy of the current files
+        run: |
+          mkdir -p files
+          gh release download "$TAG" --dir files --clobber
+          ls -l files
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files-before-${{ inputs.tag }}
+          path: files/
+          retention-days: 7
+
+      - name: Add the signature and latest.json
+        env:
+          SIG: ${{ inputs.sig_b64 }}
+          LATEST: ${{ inputs.latest_b64 }}
+        run: |
+          v="${TAG#v}"
+          if [ -n "$SIG" ]; then
+            echo "$SIG" | base64 -d > "files/SterlingQuestSync_${v}_x64-setup.exe.sig"
+          fi
+          if [ -n "$LATEST" ]; then
+            echo "$LATEST" | base64 -d > files/latest.json
+            # The update feed must name this version and carry this signature.
+            jq -e --arg v "$v" '.version == $v' files/latest.json > /dev/null || { echo "latest.json is for another version"; exit 1; }
+            if [ -f "files/SterlingQuestSync_${v}_x64-setup.exe.sig" ]; then
+              jq -e --arg s "$(cat "files/SterlingQuestSync_${v}_x64-setup.exe.sig")" '.platforms["windows-x86_64"].signature == $s' files/latest.json > /dev/null \
+                || { echo "latest.json's signature doesn't match the .sig file"; exit 1; }
+            fi
+          fi
+
+      - name: Re-upload every file as the bot
+        run: |
+          for f in files/*; do
+            gh release upload "$TAG" "$f" --clobber
+          done
+
+      - name: Publish
+        if: inputs.publish
+        run: gh release edit "$TAG" --draft=false --latest
+
+      - name: Check who the release and its files belong to
+        run: |
+          gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$TAG\") | \"Published by \(.author.login); files by: \([.assets[].uploader.login] | unique | join(\", \"))\""
