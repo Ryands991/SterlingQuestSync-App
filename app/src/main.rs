@@ -2042,6 +2042,14 @@ mod tests {
         assert_eq!(classify_autostart(false, Some(&[2])), Autostart::Missing);
     }
 
+    /// Every version has its release notes before it's tagged (docs/release-notes/v<version>.md).
+    #[test]
+    fn release_notes_exist_for_this_version() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../docs/release-notes/v{VERSION}.md"));
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(text.contains("## What's new"), "write {} before tagging this version", path.display());
+    }
+
     #[test]
     fn install_identity_never_changes() {
         let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
