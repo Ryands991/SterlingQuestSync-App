@@ -1353,6 +1353,10 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String> {
 /// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
 const WHATS_NEW: &[(&str, &[&str])] = &[
     (
+        "0.1.27",
+        &["Installing a new version over a much older one works again, without uninstalling first."],
+    ),
+    (
         "0.1.26",
         &[
             "Updates are sturdier: the app asks Sterling's own server where the newest version is, with GitHub as a backup, and tries again if the first try fails.",
@@ -1903,6 +1907,24 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Installed copies find each other, and find updates, through these values. Changing any of them
+    /// strands people on an old version (0.1.24's publisher change broke installing over 0.1.23, and
+    /// the repo move broke 0.1.23's update check). If one really must change, the installer and the
+    /// update feed need a plan first; see "Sterling Quest Sync - Updates, Notices and Deploys".
+    #[test]
+    fn install_identity_never_changes() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(conf["productName"], "Sterling Quest Sync", "the install folder and Windows uninstall entry");
+        assert_eq!(conf["identifier"], "com.sterlingaddons.questsync", "the app's identity on Windows");
+        assert_eq!(conf["bundle"]["windows"]["nsis"]["installMode"], "currentUser", "where it installs");
+        assert_eq!(conf["bundle"]["windows"]["nsis"]["template"], "installer.nsi", "the installer that finds older installs");
+        let feeds = conf["plugins"]["updater"]["endpoints"].as_array().unwrap();
+        assert_eq!(feeds[0], "https://sync.sterlingaddons.com/update/latest.json", "the update address this project controls");
+        assert!(feeds.iter().any(|f| f == "https://github.com/SterlingAddons/SterlingQuestSync-App/releases/latest/download/latest.json"));
+        let nsi = include_str!("../installer.nsi");
+        assert!(nsi.contains("Call SterlingInstallDirFallback"), "the old-install fix in installer.nsi");
+    }
 
     #[test]
     fn labels_are_cleaned() {

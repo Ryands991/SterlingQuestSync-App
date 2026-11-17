@@ -83,6 +83,10 @@ That news travels in game. Be online at the same time as your friend, then `/rel
 
 Home says why and shows **Download it yourself**. Click it, download the newest `SterlingQuestSync_<version>_x64-setup.exe` and run it. It installs over the old version; your settings and partners stay. (Versions before 0.1.24 can't update on their own any more: install the newest one this way once.)
 
+**The installer says "Unable to uninstall!" or "Error launching installer"**
+
+This happens when you install 0.1.26 or older over 0.1.23 or older. Click OK, uninstall **Sterling Quest Sync** in Windows **Settings > Apps > Installed apps**, then run the installer again. Your settings and partners stay. Installers from 0.1.27 on handle this themselves.
+
 **"Can't reach the server"**
 
 The app keeps trying on its own. If it lasts more than an hour, open an issue.
