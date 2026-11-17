@@ -133,4 +133,4 @@ npx @tauri-apps/cli@2.12.4 build                # the Windows installer, from th
 
 MIT. See [LICENSE](LICENSE).
 
-> Built by SterlingAddons with the help of Claude, an AI model by Anthropic. The ideas, testing and decisions are mine; much of the code was written with Claude. Everything is tested in game with friends.
+> Built by Sterling with the help of Claude, an AI model by Anthropic. The ideas, testing and decisions are mine; much of the code was written with Claude. Everything is tested in game with friends.

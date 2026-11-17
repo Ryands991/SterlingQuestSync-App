@@ -39,7 +39,7 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "publisher": "SterlingAddons",
+    "publisher": "Sterling",
     "shortDescription": "Optional companion app for the Sterling Quest Sync add-on",
     "copyright": "MIT",
     "windows": {

@@ -1,7 +1,7 @@
 ## Interface: 16001, 11509
 ## Title: Sterling Quest Sync Companion
 ## Notes: Part of the optional Sterling Quest Sync Companion app. Passes quest progress between the add-on and the app. Keep this enabled while you use the app.
-## Author: SterlingAddons
+## Author: Sterling
 ## IconTexture: Interface\AddOns\SterlingQuestSync\icon
 ## Version: 1
 ## SavedVariables: SterlingQuestSyncOut
