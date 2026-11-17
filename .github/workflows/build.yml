@@ -16,6 +16,11 @@ jobs:
       contents: write   # only used on a version tag, to make a DRAFT release
     steps:
       - uses: actions/checkout@v6
+      # A release never goes out bare: its notes must be written before the version is tagged.
+      - name: Release notes are there
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: test -s "docs/release-notes/${GITHUB_REF_NAME}.md" || { echo "Missing docs/release-notes/${GITHUB_REF_NAME}.md"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Tests (core and app)
@@ -42,4 +47,5 @@ jobs:
         with:
           draft: true
           name: Sterling Quest Sync Companion ${{ github.ref_name }}
+          body_path: docs/release-notes/${{ github.ref_name }}.md
           files: out/*.exe
