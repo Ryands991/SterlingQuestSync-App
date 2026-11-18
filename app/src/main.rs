@@ -1814,6 +1814,7 @@ fn maybe_sync(app: &AppHandle) -> Result<(), String>
 /// Short notes shown once after an update, newest last. Keep each line plain and under ~80 characters.
 const WHATS_NEW: &[(&str, &[&str])] = &
 [
+    ("0.1.29", &["Test builds of Sterling Quest Sync (like 0.3.17.01) now show as installed and keep updating."]),
     ("0.1.28", &["If Start with Windows is turned off in Task Manager or Windows Settings, the app leaves it off and says so in Settings."]),
     ("0.1.27", &["Installing a new version over a much older one works again, without uninstalling first."]),
     (
