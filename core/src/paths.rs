@@ -26,51 +26,52 @@ pub struct GameFolder
 }
 
 /// True when the folder looks like a game flavour folder.
-pub fn looks_like_game(p: &Path) -> bool
+pub fn looks_like_game(path: &Path) -> bool
 {
-    p.join("Interface").join("AddOns").is_dir() || (p.join("WTF").is_dir() && p.join("Interface").is_dir())
+    path.join("Interface").join("AddOns").is_dir() || (path.join("WTF").is_dir() && path.join("Interface").is_dir())
 }
 
-pub fn inspect(p: &Path) -> Option<GameFolder>
+/// Details of a game folder, if this is one.
+pub fn inspect(given: &Path) -> Option<GameFolder>
 {
-    if !looks_like_game(p)
+    if !looks_like_game(given)
     {
         return None;
     }
 
-    let addons = p.join("Interface").join("AddOns");
+    let addons = given.join("Interface").join("AddOns");
 
     Some(GameFolder
     {
-        path: p.to_path_buf(),
-        flavour: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        path: given.to_path_buf(),
+        flavour: given.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         has_sterling: addons.join("Sterling").join("Sterling.toc").is_file() || addons.join("Sterling").is_dir(),
         has_companion: addons.join("SterlingQuestSync").is_dir(),
-        sterling_version: crate::updater::installed_version(p),
-        accounts: wtf_accounts(p),
+        sterling_version: crate::updater::installed_version(given),
+        accounts: wtf_accounts(given),
     })
 }
 
 /// Accepts the folder the person picked, or a parent of it, and returns the flavour folder.
 /// Picking `World of Warcraft` finds `_forever_` inside; picking `Interface` or `AddOns` walks up.
-pub fn normalise_pick(p: &Path) -> Option<PathBuf>
+pub fn normalise_pick(path: &Path) -> Option<PathBuf>
 {
-    if looks_like_game(p)
+    if looks_like_game(path)
     {
-        return Some(p.to_path_buf());
+        return Some(path.to_path_buf());
     }
 
-    for f in FLAVOURS
+    for flavour in FLAVOURS
     {
-        let c = p.join(f);
+        let candidate = path.join(flavour);
 
-        if looks_like_game(&c)
+        if looks_like_game(&candidate)
         {
-            return Some(c);
+            return Some(candidate);
         }
     }
 
-    let mut cur = p;
+    let mut cur = path;
 
     for _ in 0..3
     {
@@ -85,17 +86,18 @@ pub fn normalise_pick(p: &Path) -> Option<PathBuf>
     None
 }
 
+/// The account folders under WTF\Account.
 pub fn wtf_accounts(game: &Path) -> Vec<String>
 {
     let mut out = Vec::new();
 
-    if let Ok(rd) = fs::read_dir(game.join("WTF").join("Account"))
+    if let Ok(dir) = fs::read_dir(game.join("WTF").join("Account"))
     {
-        for e in rd.flatten()
+        for entry in dir.flatten()
         {
-            let name = e.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().to_string_lossy().into_owned();
 
-            if e.path().join("SavedVariables").is_dir() && name != "SavedVariables"
+            if entry.path().join("SavedVariables").is_dir() && name != "SavedVariables"
             {
                 out.push(name);
             }
@@ -124,11 +126,13 @@ pub fn sterling_saved(game: &Path, account: &str) -> PathBuf
     saved_variables(game, account).join("Sterling.lua")
 }
 
+/// The companion add-on's folder.
 pub fn companion_dir(game: &Path) -> PathBuf
 {
     game.join("Interface").join("AddOns").join("SterlingQuestSync")
 }
 
+/// The companion's Inbox.lua.
 pub fn inbox_file(game: &Path) -> PathBuf
 {
     companion_dir(game).join("Inbox.lua")
@@ -142,7 +146,7 @@ pub fn candidates() -> Vec<PathBuf>
     {
         for drive in b'C'..=b'H'
         {
-            let d = format!("{}:\\", drive as char);
+            let drive_root = format!("{}:\\", drive as char);
 
             for sub in
             [
@@ -154,7 +158,7 @@ pub fn candidates() -> Vec<PathBuf>
             ]
 
             {
-                roots.push(PathBuf::from(&d).join(sub));
+                roots.push(PathBuf::from(&drive_root).join(sub));
             }
         }
 
@@ -165,15 +169,15 @@ pub fn candidates() -> Vec<PathBuf>
     {
         roots.push(PathBuf::from("/Applications/World of Warcraft"));
 
-        if let Some(h) = dirs::home_dir()
+        if let Some(home) = dirs::home_dir()
         {
-            roots.push(h.join("Applications/World of Warcraft"));
+            roots.push(home.join("Applications/World of Warcraft"));
         }
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        if let Some(h) = dirs::home_dir()
+        if let Some(home) = dirs::home_dir()
         {
             for sub in
             [
@@ -183,7 +187,7 @@ pub fn candidates() -> Vec<PathBuf>
             ]
 
             {
-                roots.push(h.join(sub));
+                roots.push(home.join(sub));
             }
         }
     }
@@ -200,21 +204,21 @@ fn registry_installs() -> Vec<PathBuf>
     let mut out = Vec::new();
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
 
-    for k in [r"SOFTWARE\WOW6432Node\Blizzard Entertainment\World of Warcraft", r"SOFTWARE\Blizzard Entertainment\World of Warcraft"]
+    for reg_key in [r"SOFTWARE\WOW6432Node\Blizzard Entertainment\World of Warcraft", r"SOFTWARE\Blizzard Entertainment\World of Warcraft"]
     {
-        if let Ok(key) = hklm.open_subkey_with_flags(k, KEY_READ)
+        if let Ok(key) = hklm.open_subkey_with_flags(reg_key, KEY_READ)
         {
-            if let Ok(p) = key.get_value::<String, _>("InstallPath")
+            if let Ok(install) = key.get_value::<String, _>("InstallPath")
             {
-                let p = PathBuf::from(p.trim_end_matches(['\\', '/']));
+                let path = PathBuf::from(install.trim_end_matches(['\\', '/']));
 
                 // InstallPath often points at a flavour folder; check its parent too.
-                if let Some(parent) = p.parent()
+                if let Some(parent) = path.parent()
                 {
                     out.push(parent.to_path_buf());
                 }
 
-                out.push(p);
+                out.push(path);
             }
         }
     }
@@ -228,37 +232,38 @@ pub fn discover() -> Vec<GameFolder>
     discover_in(&candidates())
 }
 
+/// Every game folder under these roots, without repeats.
 pub fn discover_in(roots: &[PathBuf]) -> Vec<GameFolder>
 {
     let mut seen: Vec<String> = Vec::new();
     let mut out = Vec::new();
-    let mut push = |p: PathBuf, out: &mut Vec<GameFolder>|
+    let mut push = |path: PathBuf, out: &mut Vec<GameFolder>|
     {
-        let k = fs::canonicalize(&p).unwrap_or(p.clone()).to_string_lossy().to_lowercase();
+        let key = fs::canonicalize(&path).unwrap_or(path.clone()).to_string_lossy().to_lowercase();
 
-        if seen.contains(&k)
+        if seen.contains(&key)
         {
             return;
         }
 
-        if let Some(g) = inspect(&p)
+        if let Some(game) = inspect(&path)
         {
-            seen.push(k);
-            out.push(g);
+            seen.push(key);
+            out.push(game);
         }
     };
 
-    for r in roots
+    for root in roots
     {
-        if looks_like_game(r)
+        if looks_like_game(root)
         {
-            push(r.clone(), &mut out);
+            push(root.clone(), &mut out);
             continue;
         }
 
-        for f in FLAVOURS
+        for flavour in FLAVOURS
         {
-            push(r.join(f), &mut out);
+            push(root.join(flavour), &mut out);
         }
     }
 
@@ -274,29 +279,29 @@ mod tests
 
     fn fake_install(root: &Path, flavour: &str, sterling: bool) -> PathBuf
     {
-        let g = root.join("World of Warcraft").join(flavour);
+        let game = root.join("World of Warcraft").join(flavour);
 
-        fs::create_dir_all(g.join("Interface/AddOns/Questie")).unwrap();
-        fs::create_dir_all(g.join("WTF/Account/TESTACCOUNT/SavedVariables")).unwrap();
-        fs::create_dir_all(g.join("WTF/Account/SavedVariables")).unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/Questie")).unwrap();
+        fs::create_dir_all(game.join("WTF/Account/TESTACCOUNT/SavedVariables")).unwrap();
+        fs::create_dir_all(game.join("WTF/Account/SavedVariables")).unwrap();
 
         if sterling
         {
-            fs::create_dir_all(g.join("Interface/AddOns/Sterling")).unwrap();
+            fs::create_dir_all(game.join("Interface/AddOns/Sterling")).unwrap();
         }
 
-        g
+        game
     }
 
     #[test]
     fn finds_flavour_folders_forever_first()
     {
-        let t = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
 
-        fake_install(t.path(), "_retail_", false);
+        fake_install(temp.path(), "_retail_", false);
 
-        let forever = fake_install(t.path(), "_forever_", true);
-        let found = discover_in(&[t.path().join("World of Warcraft"), forever.clone()]);
+        let forever = fake_install(temp.path(), "_forever_", true);
+        let found = discover_in(&[temp.path().join("World of Warcraft"), forever.clone()]);
 
         assert_eq!(found.len(), 2, "no duplicates");
         assert_eq!(found[0].flavour, "_forever_");
@@ -307,21 +312,21 @@ mod tests
     #[test]
     fn picking_a_parent_or_child_folder_still_works()
     {
-        let t = tempfile::tempdir().unwrap();
-        let g = fake_install(t.path(), "_forever_", true);
+        let temp = tempfile::tempdir().unwrap();
+        let game = fake_install(temp.path(), "_forever_", true);
 
-        assert_eq!(normalise_pick(&t.path().join("World of Warcraft")), Some(g.clone()));
-        assert_eq!(normalise_pick(&g.join("Interface/AddOns/Questie")), Some(g.clone()));
-        assert_eq!(normalise_pick(&g), Some(g.clone()));
-        assert_eq!(normalise_pick(t.path()), None);
+        assert_eq!(normalise_pick(&temp.path().join("World of Warcraft")), Some(game.clone()));
+        assert_eq!(normalise_pick(&game.join("Interface/AddOns/Questie")), Some(game.clone()));
+        assert_eq!(normalise_pick(&game), Some(game.clone()));
+        assert_eq!(normalise_pick(temp.path()), None);
     }
 
     #[test]
     fn file_paths_are_where_the_game_keeps_them()
     {
-        let g = Path::new("/g/_forever_");
+        let game = Path::new("/g/_forever_");
 
-        assert!(outbox_file(g, "A").ends_with("WTF/Account/A/SavedVariables/SterlingQuestSync.lua"));
-        assert!(inbox_file(g).ends_with("Interface/AddOns/SterlingQuestSync/Inbox.lua"));
+        assert!(outbox_file(game, "A").ends_with("WTF/Account/A/SavedVariables/SterlingQuestSync.lua"));
+        assert!(inbox_file(game).ends_with("Interface/AddOns/SterlingQuestSync/Inbox.lua"));
     }
 }

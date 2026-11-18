@@ -20,6 +20,7 @@ static RE_ADDON_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-
 /// How many backup sets to keep.
 pub const KEEP_BACKUPS: usize = 30;
 
+/// Unix time in seconds.
 fn now() -> u64
 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -80,11 +81,12 @@ pub fn helper_not_loaded(game: &Path) -> bool
     }
 }
 
+/// Is the companion add-on in the game's AddOns folder?
 pub fn is_installed(fs_: &SafeFs) -> bool
 {
-    let d = fs_.root(Root::Companion);
+    let dir = fs_.root(Root::Companion);
 
-    d.join("SterlingQuestSync.toc").is_file() && d.join("Inbox.lua").is_file()
+    dir.join("SterlingQuestSync.toc").is_file() && dir.join("Inbox.lua").is_file()
 }
 
 /// Writes Inbox.lua (temp file and swap). Skips the write when nothing changed.
@@ -106,11 +108,13 @@ pub fn write_inbox(fs_: &SafeFs, inbox: &Inbox, written: i64) -> Result<bool>
     Ok(true)
 }
 
-fn strip_written(s: &str) -> String
+/// The text without its "written =" line, to compare two inboxes by content.
+fn strip_written(text: &str) -> String
 {
-    s.lines().filter(|l| !l.trim_start().starts_with("written =")).collect::<Vec<_>>().join("\n")
+    text.lines().filter(|l| !l.trim_start().starts_with("written =")).collect::<Vec<_>>().join("\n")
 }
 
+/// Where older inboxes are kept.
 fn backups_dir(fs_: &SafeFs) -> PathBuf
 {
     fs_.root(Root::AppData).join("backups")
@@ -126,11 +130,11 @@ pub fn backup_saved_variables(fs_: &SafeFs, reason: &str) -> Result<Option<PathB
 
     for acct in paths::wtf_accounts(fs_.game())
     {
-        let sv = paths::saved_variables(fs_.game(), &acct);
+        let saved_vars = paths::saved_variables(fs_.game(), &acct);
 
         for name in ["Sterling.lua", "Sterling.lua.bak", "SterlingQuestSync.lua", "SterlingQuestSync.lua.bak"]
         {
-            let src = sv.join(name);
+            let src = saved_vars.join(name);
 
             if src.is_file()
             {
@@ -152,23 +156,24 @@ pub fn backup_saved_variables(fs_: &SafeFs, reason: &str) -> Result<Option<PathB
 /// Backup sets, newest first.
 pub fn list_backups(fs_: &SafeFs) -> Vec<PathBuf>
 {
-    let mut v: Vec<(u64, PathBuf)> = fs::read_dir(backups_dir(fs_))
+    let mut backups: Vec<(u64, PathBuf)> = fs::read_dir(backups_dir(fs_))
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| e.path().is_dir())
-        .filter_map(|e|
+        .filter_map(|entry|
         {
-            let n = e.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().to_string_lossy().into_owned();
 
-            n.split('-').next()?.parse::<u64>().ok().map(|t| (t, e.path()))
+            name.split('-').next()?.parse::<u64>().ok().map(|t| (t, entry.path()))
         })
         .collect();
 
-    v.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
-    v.into_iter().map(|(_, p)| p).collect()
+    backups.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    backups.into_iter().map(|(_, p)| p).collect()
 }
 
+/// Keeps only the newest inbox backups.
 fn prune_backups(fs_: &SafeFs) -> Result<()>
 {
     for old in list_backups(fs_).into_iter().skip(KEEP_BACKUPS)
@@ -180,12 +185,12 @@ fn prune_backups(fs_: &SafeFs) -> Result<()>
 }
 
 /// "Delete" inside the allowlist: moves into the app's trash folder instead.
-pub fn move_to_trash(fs_: &SafeFs, p: &Path) -> Result<PathBuf>
+pub fn move_to_trash(fs_: &SafeFs, path: &Path) -> Result<PathBuf>
 {
-    let name = p.file_name().ok_or_else(|| Error::Refused("nothing to trash".into()))?;
+    let name = path.file_name().ok_or_else(|| Error::Refused("nothing to trash".into()))?;
     let dst = fs_.root(Root::AppData).join("trash").join(format!("{}-{}", now(), name.to_string_lossy()));
 
-    fs_.rename(p, &dst)?;
+    fs_.rename(path, &dst)?;
     Ok(dst)
 }
 
@@ -197,101 +202,101 @@ mod tests
 
     fn setup() -> (tempfile::TempDir, SafeFs)
     {
-        let t = tempfile::tempdir().unwrap();
-        let g = t.path().join("_forever_");
+        let temp = tempfile::tempdir().unwrap();
+        let game = temp.path().join("_forever_");
 
-        fs::create_dir_all(g.join("Interface/AddOns/Questie")).unwrap();
-        fs::write(g.join("Interface/AddOns/Questie/Questie.toc"), "x").unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/Questie")).unwrap();
+        fs::write(game.join("Interface/AddOns/Questie/Questie.toc"), "x").unwrap();
 
-        let sv = g.join("WTF/Account/TESTACCOUNT/SavedVariables");
+        let saved_vars = game.join("WTF/Account/TESTACCOUNT/SavedVariables");
 
-        fs::create_dir_all(&sv).unwrap();
-        fs::write(sv.join("Sterling.lua"), "SterlingDB = {}").unwrap();
-        fs::write(sv.join("Sterling.lua.bak"), "SterlingDB = {}").unwrap();
-        fs::write(sv.join("Questie.lua"), "QuestieDB = {}").unwrap();
+        fs::create_dir_all(&saved_vars).unwrap();
+        fs::write(saved_vars.join("Sterling.lua"), "SterlingDB = {}").unwrap();
+        fs::write(saved_vars.join("Sterling.lua.bak"), "SterlingDB = {}").unwrap();
+        fs::write(saved_vars.join("Questie.lua"), "QuestieDB = {}").unwrap();
 
-        let s = SafeFs::new(&g, &t.path().join("appdata")).unwrap();
-        (t, s)
+        let safe = SafeFs::new(&game, &temp.path().join("appdata")).unwrap();
+        (temp, safe)
     }
 
     #[test]
     fn installs_the_companion_and_an_empty_inbox()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
-        install(&s, &[("SterlingQuestSync.toc", crate::formats::companion_toc().as_bytes()), ("Core.lua", b"-- core")]).unwrap();
-        assert!(is_installed(&s));
-        assert!(install(&s, &[("../Questie/Questie.toc", b"x")]).is_err());
-        assert!(install(&s, &[("Inbox.lua", b"x")]).is_err());
-        assert!(install(&s, &[("evil.exe", b"x")]).is_err());
-        assert_eq!(fs::read_to_string(s.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "x");
+        install(&safe, &[("SterlingQuestSync.toc", crate::formats::companion_toc().as_bytes()), ("Core.lua", b"-- core")]).unwrap();
+        assert!(is_installed(&safe));
+        assert!(install(&safe, &[("../Questie/Questie.toc", b"x")]).is_err());
+        assert!(install(&safe, &[("Inbox.lua", b"x")]).is_err());
+        assert!(install(&safe, &[("evil.exe", b"x")]).is_err());
+        assert_eq!(fs::read_to_string(safe.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "x");
     }
 
     #[test]
     fn inbox_is_only_rewritten_when_it_changes()
     {
-        let (_t, s) = setup();
-        let mut ib = Inbox::default();
+        let (_t, safe) = setup();
+        let mut inbox = Inbox::default();
 
-        ib.put_packet
+        inbox.put_packet
         (
             "Player-6800-0000A11C",
             InPacket { seq: 1, from: "Player-6800-0A1B2C3D".into(), kind: Kind::Partner, time: 1794770000, proto: 6, data: "AB".into() },
         );
 
-        assert!(write_inbox(&s, &ib, 1794770000).unwrap());
-        assert!(!write_inbox(&s, &ib, 1794770999).unwrap());
-        ib.put_packet
+        assert!(write_inbox(&safe, &inbox, 1794770000).unwrap());
+        assert!(!write_inbox(&safe, &inbox, 1794770999).unwrap());
+        inbox.put_packet
         (
             "Player-6800-0000A11C",
             InPacket { seq: 2, from: "Player-6800-0A1B2C3D".into(), kind: Kind::Partner, time: 1794770100, proto: 6, data: "CD".into() },
         );
 
-        assert!(write_inbox(&s, &ib, 1794771000).unwrap());
+        assert!(write_inbox(&safe, &inbox, 1794771000).unwrap());
     }
 
     #[test]
     fn backups_copy_from_wtf_and_leave_it_untouched()
     {
-        let (_t, s) = setup();
-        let sv = s.game().join("WTF/Account/TESTACCOUNT/SavedVariables");
-        let before: Vec<_> = fs::read_dir(&sv).unwrap().flatten().map(|e| e.file_name()).collect();
-        let set = backup_saved_variables(&s, "test").unwrap().unwrap();
+        let (_t, safe) = setup();
+        let saved_vars = safe.game().join("WTF/Account/TESTACCOUNT/SavedVariables");
+        let before: Vec<_> = fs::read_dir(&saved_vars).unwrap().flatten().map(|e| e.file_name()).collect();
+        let set = backup_saved_variables(&safe, "test").unwrap().unwrap();
 
         assert!(set.join("TESTACCOUNT/Sterling.lua").is_file());
         assert!(set.join("TESTACCOUNT/Sterling.lua.bak").is_file());
         assert!(!set.join("TESTACCOUNT/Questie.lua").exists(), "only Sterling's files");
 
-        let after: Vec<_> = fs::read_dir(&sv).unwrap().flatten().map(|e| e.file_name()).collect();
+        let after: Vec<_> = fs::read_dir(&saved_vars).unwrap().flatten().map(|e| e.file_name()).collect();
 
         assert_eq!(before.len(), after.len());
-        assert_eq!(fs::read_to_string(sv.join("Sterling.lua")).unwrap(), "SterlingDB = {}");
+        assert_eq!(fs::read_to_string(saved_vars.join("Sterling.lua")).unwrap(), "SterlingDB = {}");
     }
 
     #[test]
     fn old_backups_are_pruned()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
         for i in 0..(KEEP_BACKUPS + 5)
         {
-            fs::create_dir_all(backups_dir(&s).join(format!("{}-old", 1000 + i))).unwrap();
+            fs::create_dir_all(backups_dir(&safe).join(format!("{}-old", 1000 + i))).unwrap();
         }
 
-        backup_saved_variables(&s, "x").unwrap();
-        assert_eq!(list_backups(&s).len(), KEEP_BACKUPS);
+        backup_saved_variables(&safe, "x").unwrap();
+        assert_eq!(list_backups(&safe).len(), KEEP_BACKUPS);
     }
 
     #[test]
     fn trash_refuses_wtf_and_other_addons()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
-        assert!(move_to_trash(&s, &s.game().join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua")).is_err());
-        assert!(move_to_trash(&s, &s.game().join("Interface/AddOns/Questie")).is_err());
-        install(&s, &[("SterlingQuestSync.toc", b"x")]).unwrap();
+        assert!(move_to_trash(&safe, &safe.game().join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua")).is_err());
+        assert!(move_to_trash(&safe, &safe.game().join("Interface/AddOns/Questie")).is_err());
+        install(&safe, &[("SterlingQuestSync.toc", b"x")]).unwrap();
 
-        let moved = move_to_trash(&s, &s.root(Root::Companion).join("SterlingQuestSync.toc")).unwrap();
+        let moved = move_to_trash(&safe, &safe.root(Root::Companion).join("SterlingQuestSync.toc")).unwrap();
 
         assert!(moved.is_file());
     }
@@ -301,46 +306,46 @@ mod tests
     {
         use std::time::{Duration, SystemTime};
 
-        let d = tempfile::tempdir().unwrap();
-        let g = d.path();
-        let sv = g.join("WTF/Account/TESTACCOUNT/SavedVariables");
+        let temp = tempfile::tempdir().unwrap();
+        let game = temp.path();
+        let saved_vars = game.join("WTF/Account/TESTACCOUNT/SavedVariables");
 
-        fs::create_dir_all(&sv).unwrap();
-        fs::create_dir_all(g.join("Interface/AddOns/SterlingQuestSync")).unwrap();
+        fs::create_dir_all(&saved_vars).unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/SterlingQuestSync")).unwrap();
 
-        let toc = g.join("Interface/AddOns/SterlingQuestSync/SterlingQuestSync.toc");
+        let toc = game.join("Interface/AddOns/SterlingQuestSync/SterlingQuestSync.toc");
 
         fs::write(&toc, "x").unwrap();
 
-        let set = |p: &Path, secs: u64|
+        let set = |path: &Path, secs: u64|
         {
-            let f = fs::File::options().write(true).open(p).unwrap();
+            let opened = fs::File::options().write(true).open(path).unwrap();
 
-            f.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
+            opened.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)).unwrap();
         };
 
         set(&toc, 1_000_000);
         // No save since the helper was added: not a problem yet.
-        assert!(!helper_not_loaded(g));
+        assert!(!helper_not_loaded(game));
 
-        let sterling = sv.join("Sterling.lua");
+        let sterling = saved_vars.join("Sterling.lua");
 
         fs::write(&sterling, "x").unwrap();
         set(&sterling, 1_000_500);
         // Sterling saved, the helper didn't: not loaded.
-        assert!(helper_not_loaded(g));
+        assert!(helper_not_loaded(game));
 
-        let helper = sv.join("SterlingQuestSync.lua");
+        let helper = saved_vars.join("SterlingQuestSync.lua");
 
         fs::write(&helper, "x").unwrap();
         set(&helper, 1_000_100);
         // The helper's file is from an older session: still not loaded now.
-        assert!(helper_not_loaded(g));
+        assert!(helper_not_loaded(game));
         set(&helper, 1_000_499);
         // Saved together: loaded.
-        assert!(!helper_not_loaded(g));
+        assert!(!helper_not_loaded(game));
         // An older Sterling save from before the helper was added doesn't count.
         set(&sterling, 999_000);
-        assert!(!helper_not_loaded(g));
+        assert!(!helper_not_loaded(game));
     }
 }

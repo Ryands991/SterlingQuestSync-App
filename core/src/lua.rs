@@ -65,9 +65,9 @@ impl Value
 
 impl Table
 {
-    pub fn get(&self, k: &str) -> Option<&Value>
+    pub fn get(&self, key: &str) -> Option<&Value>
     {
-        self.map.get(k)
+        self.map.get(key)
     }
 }
 
@@ -80,6 +80,7 @@ struct P<'a>
     i: usize,
 }
 
+/// A parse error at a byte position.
 fn err<T>(msg: &str, at: usize) -> Result<T>
 {
     Err(Error::Parse(format!("{} at byte {}", msg, at)))
@@ -111,11 +112,11 @@ impl<'a> P<'a>
         }
     }
 
-    fn eat(&mut self, c: u8) -> bool
+    fn eat(&mut self, byte: u8) -> bool
     {
         self.skip();
 
-        if self.i < self.s.len() && self.s[self.i] == c
+        if self.i < self.s.len() && self.s[self.i] == byte
         {
             self.i += 1;
             true
@@ -150,7 +151,7 @@ impl<'a> P<'a>
 
     fn string(&mut self) -> Result<String>
     {
-        let q = self.s[self.i];
+        let quote = self.s[self.i];
 
         self.i += 1;
 
@@ -158,23 +159,23 @@ impl<'a> P<'a>
 
         while self.i < self.s.len()
         {
-            let c = self.s[self.i];
+            let byte = self.s[self.i];
 
             self.i += 1;
 
-            if c == q
+            if byte == quote
             {
                 return Ok(String::from_utf8_lossy(&out).into_owned());
             }
 
-            if c == b'\n'
+            if byte == b'\n'
             {
                 return err("newline in string", self.i);
             }
 
-            if c != b'\\'
+            if byte != b'\\'
             {
-                out.push(c);
+                out.push(byte);
                 continue;
             }
 
@@ -183,11 +184,11 @@ impl<'a> P<'a>
                 break;
             }
 
-            let e = self.s[self.i];
+            let digit = self.s[self.i];
 
             self.i += 1;
 
-            match e
+            match digit
             {
                 b'n' => out.push(b'\n'),
                 b't' => out.push(b'\t'),
@@ -198,23 +199,23 @@ impl<'a> P<'a>
                 b'\n' => out.push(b'\n'),
                 b'0'..=b'9' =>
                 {
-                    let mut n: u32 = (e - b'0') as u32;
+                    let mut number: u32 = (digit - b'0') as u32;
 
                     for _ in 0..2
                     {
                         if self.i < self.s.len() && self.s[self.i].is_ascii_digit()
                         {
-                            n = n * 10 + (self.s[self.i] - b'0') as u32;
+                            number = number * 10 + (self.s[self.i] - b'0') as u32;
                             self.i += 1;
                         }
                     }
 
-                    if n > 255
+                    if number > 255
                     {
                         return err("bad escape", self.i);
                     }
 
-                    out.push(n as u8);
+                    out.push(number as u8);
                 }
 
                 _ => return err("unknown escape", self.i),
@@ -233,19 +234,19 @@ impl<'a> P<'a>
             self.i += 1;
         }
 
-        let t = std::str::from_utf8(&self.s[start..self.i]).unwrap_or("");
+        let text = std::str::from_utf8(&self.s[start..self.i]).unwrap_or("");
 
-        if let Some(h) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X"))
+        if let Some(hex_digits) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X"))
         {
-            return i64::from_str_radix(h, 16).map(|v| v as f64).or_else(|_| err("bad hex number", start));
+            return i64::from_str_radix(hex_digits, 16).map(|v| v as f64).or_else(|_| err("bad hex number", start));
         }
 
-        if let Some(h) = t.strip_prefix("-0x")
+        if let Some(hex_digits) = text.strip_prefix("-0x")
         {
-            return i64::from_str_radix(h, 16).map(|v| -(v as f64)).or_else(|_| err("bad hex number", start));
+            return i64::from_str_radix(hex_digits, 16).map(|v| -(v as f64)).or_else(|_| err("bad hex number", start));
         }
 
-        match t.parse::<f64>()
+        match text.parse::<f64>()
         {
             Ok(v) if v.is_finite() => Ok(v),
             _ => err("bad number", start),
@@ -289,13 +290,13 @@ impl<'a> P<'a>
 
     fn table(&mut self, depth: usize) -> Result<Table>
     {
-        let mut t = Table::default();
+        let mut built = Table::default();
 
         loop
         {
             if self.eat(b'}')
             {
-                return Ok(t);
+                return Ok(built);
             }
 
             self.skip();
@@ -305,7 +306,7 @@ impl<'a> P<'a>
                 self.i += 1;
                 self.skip();
 
-                let k = match self.value(depth)?
+                let table_key = match self.value(depth)?
                 {
                     Value::Str(s) => s,
                     Value::Num(n) if n.fract() == 0.0 => format!("{}", n as i64),
@@ -318,9 +319,9 @@ impl<'a> P<'a>
                     return err("expected ] =", self.i);
                 }
 
-                let v = self.value(depth)?;
+                let value = self.value(depth)?;
 
-                t.map.insert(k, v);
+                built.map.insert(table_key, value);
             }
 
             else
@@ -331,26 +332,26 @@ impl<'a> P<'a>
                 {
                     if self.eat(b'=')
                     {
-                        let v = self.value(depth)?;
+                        let value = self.value(depth)?;
 
-                        t.map.insert(id, v);
+                        built.map.insert(id, value);
                     }
 
                     else
                     {
                         self.i = save;
 
-                        let v = self.value(depth)?;
+                        let value = self.value(depth)?;
 
-                        t.list.push(v);
+                        built.list.push(value);
                     }
                 }
 
                 else
                 {
-                    let v = self.value(depth)?;
+                    let value = self.value(depth)?;
 
-                    t.list.push(v);
+                    built.list.push(value);
                 }
             }
 
@@ -358,7 +359,7 @@ impl<'a> P<'a>
             {
                 if self.eat(b'}')
                 {
-                    return Ok(t);
+                    return Ok(built);
                 }
 
                 return err("expected , or }", self.i);
@@ -375,35 +376,35 @@ pub fn parse_saved_variables(text: &str) -> Result<BTreeMap<String, Value>>
         return Err(Error::Parse("file too large".into()));
     }
 
-    let mut p = P { s: text.as_bytes(), i: 0 };
+    let mut parser = P { s: text.as_bytes(), i: 0 };
 
     // Skip a UTF-8 byte order mark.
-    if p.s.starts_with(&[0xEF, 0xBB, 0xBF])
+    if parser.s.starts_with(&[0xEF, 0xBB, 0xBF])
     {
-        p.i = 3;
+        parser.i = 3;
     }
 
     let mut out = BTreeMap::new();
 
     loop
     {
-        p.skip();
+        parser.skip();
 
-        if p.i >= p.s.len()
+        if parser.i >= parser.s.len()
         {
             return Ok(out);
         }
 
-        let name = p.ident().ok_or_else(|| Error::Parse(format!("expected a name at byte {}", p.i)))?;
+        let name = parser.ident().ok_or_else(|| Error::Parse(format!("expected a name at byte {}", parser.i)))?;
 
-        if !p.eat(b'=')
+        if !parser.eat(b'=')
         {
-            return err("expected =", p.i);
+            return err("expected =", parser.i);
         }
 
-        let v = p.value(0)?;
+        let value = parser.value(0)?;
 
-        out.insert(name, v);
+        out.insert(name, value);
     }
 }
 
@@ -435,20 +436,20 @@ SterlingQuestSyncOut = {
 OtherVar = nil
 Third = -12
 "#;
-        let m = parse_saved_variables(text).unwrap();
-        let out = m["SterlingQuestSyncOut"].as_table().unwrap();
+        let vars = parse_saved_variables(text).unwrap();
+        let out = vars["SterlingQuestSyncOut"].as_table().unwrap();
 
         assert_eq!(out.get("format").unwrap().as_i64(), Some(1));
 
-        let c = out.get("characters").unwrap().as_table().unwrap().get("Player-6800-0000A11C").unwrap().as_table().unwrap();
+        let character = out.get("characters").unwrap().as_table().unwrap().get("Player-6800-0000A11C").unwrap().as_table().unwrap();
 
-        assert_eq!(c.get("name").unwrap().as_str(), Some("Kaelith Emberfall"));
-        assert_eq!(c.get("saved").unwrap().as_i64(), Some(1794770000));
-        assert_eq!(c.get("ok").unwrap().as_bool(), Some(true));
-        assert_eq!(c.get("note").unwrap().as_str(), Some("quote \" back \\ nl \n tab \t byte A"));
-        assert_eq!(c.get("list").unwrap().as_table().unwrap().list.len(), 2);
-        assert_eq!(m["OtherVar"], Value::Nil);
-        assert_eq!(m["Third"].as_i64(), Some(-12));
+        assert_eq!(character.get("name").unwrap().as_str(), Some("Kaelith Emberfall"));
+        assert_eq!(character.get("saved").unwrap().as_i64(), Some(1794770000));
+        assert_eq!(character.get("ok").unwrap().as_bool(), Some(true));
+        assert_eq!(character.get("note").unwrap().as_str(), Some("quote \" back \\ nl \n tab \t byte A"));
+        assert_eq!(character.get("list").unwrap().as_table().unwrap().list.len(), 2);
+        assert_eq!(vars["OtherVar"], Value::Nil);
+        assert_eq!(vars["Third"].as_i64(), Some(-12));
     }
 
     #[test]

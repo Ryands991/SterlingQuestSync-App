@@ -24,21 +24,22 @@ pub struct Notice
     pub until: Option<i64>,
 }
 
-fn version(v: &str) -> Option<[u32; 3]>
+/// "0.1.25" as three numbers.
+fn version(text: &str) -> Option<[u32; 3]>
 {
     let mut out = [0u32; 3];
-    let mut parts = v.split('.');
+    let mut parts = text.split('.');
 
     for slot in out.iter_mut()
     {
-        let p = parts.next()?;
+        let part = parts.next()?;
 
-        if p.is_empty() || p.len() > 4 || !p.bytes().all(|b| b.is_ascii_digit())
+        if part.is_empty() || part.len() > 4 || !part.bytes().all(|b| b.is_ascii_digit())
         {
             return None;
         }
 
-        *slot = p.parse().ok()?;
+        *slot = part.parse().ok()?;
     }
 
     if parts.next().is_some()
@@ -52,14 +53,14 @@ fn version(v: &str) -> Option<[u32; 3]>
 /// Links may only open Sterling's own pages.
 pub fn link_ok(link: &str) -> bool
 {
-    let rest = if let Some(r) = link.strip_prefix("https://github.com/SterlingAddons/")
+    let rest = if let Some(tail) = link.strip_prefix("https://github.com/SterlingAddons/")
     {
-        r
+        tail
     }
 
-    else if let Some(r) = link.strip_prefix("https://sterlingaddons.com/")
+    else if let Some(tail) = link.strip_prefix("https://sterlingaddons.com/")
     {
-        r
+        tail
     }
 
     else
@@ -70,44 +71,46 @@ pub fn link_ok(link: &str) -> bool
     rest.len() <= 160 && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b"._~/?#=&%+-".contains(&b))
 }
 
+/// A notice id: short, lowercase letters, digits and dashes.
 fn id_ok(id: &str) -> bool
 {
     (1..=24).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-fn text_ok(t: &str) -> bool
+/// Notice text that's safe and short enough to show.
+fn text_ok(text: &str) -> bool
 {
-    let n = t.chars().count();
-    (1..=MAX_TEXT).contains(&n) && !t.chars().any(|c| c.is_control() || c == '<' || c == '>')
+    let count = text.chars().count();
+    (1..=MAX_TEXT).contains(&count) && !text.chars().any(|c| c.is_control() || c == '<' || c == '>')
 }
 
 /// Is this notice well formed and meant for `app_version` right now?
-pub fn applies(n: &Notice, app_version: &str, now: i64) -> bool
+pub fn applies(notice: &Notice, app_version: &str, now: i64) -> bool
 {
     let Some(me) = version(app_version) else { return false };
 
-    if !id_ok(&n.id) || !text_ok(&n.text) || !matches!(n.level.as_str(), "info" | "warn" | "bad")
+    if !id_ok(&notice.id) || !text_ok(&notice.text) || !matches!(notice.level.as_str(), "info" | "warn" | "bad")
     {
         return false;
     }
 
-    if n.link.as_deref().is_some_and(|l| !link_ok(l))
+    if notice.link.as_deref().is_some_and(|l| !link_ok(l))
     {
         return false;
     }
 
-    if n.until.is_some_and(|u| u <= now)
+    if notice.until.is_some_and(|u| u <= now)
     {
         return false;
     }
 
-    for (bound, low) in [(&n.from, true), (&n.to, false)]
+    for (bound, low) in [(&notice.from, true), (&notice.to, false)]
     {
-        if let Some(b) = bound
+        if let Some(limit_text) = bound
         {
-            let Some(b) = version(b) else { return false };
+            let Some(limit) = version(limit_text) else { return false };
 
-            if (low && me < b) || (!low && me > b)
+            if (low && me < limit) || (!low && me > limit)
             {
                 return false;
             }
@@ -122,16 +125,16 @@ pub fn for_app(list: &[Notice], app_version: &str, dismissed: &[String], now: i6
 {
     let mut out: Vec<Notice> = Vec::new();
 
-    for n in list
+    for notice in list
     {
         if out.len() >= MAX_SHOWN
         {
             break;
         }
 
-        if applies(n, app_version, now) && !dismissed.contains(&n.id) && !out.iter().any(|o| o.id == n.id)
+        if applies(notice, app_version, now) && !dismissed.contains(&notice.id) && !out.iter().any(|o| o.id == notice.id)
         {
-            out.push(n.clone());
+            out.push(notice.clone());
         }
     }
 
@@ -165,13 +168,13 @@ mod tests
         assert!(!applies(&n("a"), "0.1.24", 0));
         assert!(!applies(&n("a"), "0.10.0", 0));
 
-        let mut x = n("a");
+        let mut notice = n("a");
 
-        x.from = Some("0.1.25".into());
-        x.to = None;
-        assert!(!applies(&x, "0.1.24", 0));
-        assert!(applies(&x, "0.1.25", 0));
-        assert!(applies(&x, "1.0.0", 0));
+        notice.from = Some("0.1.25".into());
+        notice.to = None;
+        assert!(!applies(&notice, "0.1.24", 0));
+        assert!(applies(&notice, "0.1.25", 0));
+        assert!(applies(&notice, "1.0.0", 0));
     }
 
     #[test]
@@ -189,32 +192,32 @@ mod tests
         ]
 
         {
-            let mut x = n("a");
+            let mut notice = n("a");
 
-            x.link = Some(link.into());
-            assert!(!applies(&x, "0.1.20", 0), "{link}");
+            notice.link = Some(link.into());
+            assert!(!applies(&notice, "0.1.20", 0), "{link}");
         }
 
         for text in ["", "<b>hi</b>", "line\nbreak", &"x".repeat(241)]
         {
-            let mut x = n("a");
+            let mut notice = n("a");
 
-            x.text = text.into();
-            assert!(!applies(&x, "0.1.20", 0));
+            notice.text = text.into();
+            assert!(!applies(&notice, "0.1.20", 0));
         }
 
-        for (f, v) in [("id", "BAD ID"), ("level", "urgent"), ("to", "0.1"), ("to", "v0.1.2")]
+        for (field, value) in [("id", "BAD ID"), ("level", "urgent"), ("to", "0.1"), ("to", "v0.1.2")]
         {
-            let mut x = n("a");
+            let mut notice = n("a");
 
-            match f
+            match field
             {
-                "id" => x.id = v.into(),
-                "level" => x.level = v.into(),
-                _ => x.to = Some(v.into()),
+                "id" => notice.id = value.into(),
+                "level" => notice.level = value.into(),
+                _ => notice.to = Some(value.into()),
             }
 
-            assert!(!applies(&x, "0.1.20", 0), "{f}={v}");
+            assert!(!applies(&notice, "0.1.20", 0), "{field}={value}");
         }
     }
 

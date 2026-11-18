@@ -2,9 +2,9 @@
 -- Inbox.lua (written by the app) sets SterlingQuestSync_Inbox. Sterling Quest Sync reads it
 -- and writes outgoing copies into SterlingQuestSyncOut at logout. This file only makes sure both exist.
 
-local f = CreateFrame("Frame")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(_, _, name)
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("ADDON_LOADED")
+frame:SetScript("OnEvent", function(_, _, name)
     if name ~= "SterlingQuestSync" then return end
 
     if type(SterlingQuestSyncOut) ~= "table" or SterlingQuestSyncOut.format ~= 1 then
@@ -15,5 +15,5 @@ f:SetScript("OnEvent", function(_, _, name)
         SterlingQuestSync_Inbox = { format = 1, written = 0, chars = {} }
     end
 
-    f:UnregisterEvent("ADDON_LOADED")
+    frame:UnregisterEvent("ADDON_LOADED")
 end)

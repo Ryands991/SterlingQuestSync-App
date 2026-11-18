@@ -1,5 +1,8 @@
 //! Sterling Quest Sync app core: everything except the window.
 
+// Sterling code style puts a blank line between "}" and "else" on purpose.
+#![allow(clippy::suspicious_else_formatting)]
+
 pub mod api;
 pub mod companion;
 pub mod engine;

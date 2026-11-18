@@ -22,16 +22,17 @@ pub fn new_key() -> String
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-pub fn valid_key(k: &str) -> bool
+/// A PC key as the server makes them: 43 base64url characters.
+pub fn valid_key(key: &str) -> bool
 {
-    k.len() == 43 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    key.len() == 43 && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Only https, except a local test server.
-pub fn check_server_url(u: &str) -> Result<String>
+pub fn check_server_url(url: &str) -> Result<String>
 {
-    let u = u.trim().trim_end_matches('/');
-    let (scheme, rest) = u.split_once("://").unwrap_or(("", ""));
+    let url = url.trim().trim_end_matches('/');
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", ""));
     let host_port = rest.split('/').next().unwrap_or("");
     let host = host_port.rsplit_once(':').filter(|(_, p)| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())).map(|(h, _)| h).unwrap_or(host_port);
     // Plain http only for a test server on this very PC. The host must match exactly:
@@ -44,7 +45,7 @@ pub fn check_server_url(u: &str) -> Result<String>
         return Err(Error::Refused("the server address must start with https://".into()));
     }
 
-    Ok(u.to_string())
+    Ok(url.to_string())
 }
 
 // ------------------------------------------------------------------ shapes
@@ -210,16 +211,18 @@ static APP_VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new
 
 /// The app sets its own version once at start, so requests say which Companion version sent them
 /// ("SterlingQuestSync/0.1.25"). The server keeps it per PC, so the owner can count installs per version.
-pub fn set_app_version(v: &'static str)
+pub fn set_app_version(version: &'static str)
 {
-    let _ = APP_VERSION.set(v);
+    let _ = APP_VERSION.set(version);
 }
 
+/// The User-Agent every request sends, with the app's version.
 pub fn user_agent() -> String
 {
     format!("SterlingQuestSync/{}", APP_VERSION.get().copied().unwrap_or("0.0.0"))
 }
 
+/// The HTTP client for the sync server.
 fn http() -> Result<reqwest::blocking::Client>
 {
     reqwest::blocking::Client::builder()
@@ -269,9 +272,9 @@ impl Client
     pub fn meta(base: &str) -> Result<Meta>
     {
         let base = check_server_url(base)?;
-        let r = http()?.get(format!("{base}/v1/meta")).send().map_err(net)?;
+        let response = http()?.get(format!("{base}/v1/meta")).send().map_err(net)?;
 
-        decode(r)
+        decode(response)
     }
 
     /// Makes a new account with this client's key. Returns the recovery code once.
@@ -309,9 +312,9 @@ impl Client
 
     pub fn new_recovery(&self) -> Result<String>
     {
-        let v: Value = self.send("POST", "/v1/recovery", None)?;
+        let value: Value = self.send("POST", "/v1/recovery", None)?;
 
-        v["recovery_code"].as_str().map(String::from).ok_or_else(|| Error::Server("bad reply".into()))
+        value["recovery_code"].as_str().map(String::from).ok_or_else(|| Error::Server("bad reply".into()))
     }
 
     pub fn remove_pc(&self, key_id: &str) -> Result<()>
@@ -368,12 +371,12 @@ impl Client
     fn send<T: DeserializeOwned>(&self, method: &str, path: &str, body: Option<Value>) -> Result<T>
     {
         let url = format!("{}{}", self.base, path);
-        let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| Error::Other("bad method".into()))?;
-        let mut req = self.http.request(m, url).bearer_auth(&self.key);
+        let http_method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|_| Error::Other("bad method".into()))?;
+        let mut req = self.http.request(http_method, url).bearer_auth(&self.key);
 
-        if let Some(b) = body
+        if let Some(payload) = body
         {
-            req = req.json(&b);
+            req = req.json(&payload);
         }
 
         decode(req.send().map_err(net)?)
@@ -381,20 +384,30 @@ impl Client
 }
 
 /// Only IDs and GUIDs go in a URL path; anything else is refused.
-fn seg(s: &str) -> Result<&str>
+fn seg(part: &str) -> Result<&str>
 {
-    if !s.is_empty() && s.len() <= 32 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') { Ok(s) } else { Err(Error::Refused("bad id".into())) }
+    if !part.is_empty() && part.len() <= 32 && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        Ok(part)
+    }
+
+    else
+    {
+        Err(Error::Refused("bad id".into()))
+    }
 }
 
-fn net(e: reqwest::Error) -> Error
+/// A network failure: offline if it timed out or couldn't connect.
+fn net(cause: reqwest::Error) -> Error
 {
-    if e.is_timeout() || e.is_connect() { Error::Offline } else { Error::Server("network error".into()) }
+    if cause.is_timeout() || cause.is_connect() { Error::Offline } else { Error::Server("network error".into()) }
 }
 
-fn decode<T: DeserializeOwned>(r: reqwest::blocking::Response) -> Result<T>
+/// Reads a server reply, turning its error codes into errors.
+fn decode<T: DeserializeOwned>(response: reqwest::blocking::Response) -> Result<T>
 {
-    let status = r.status().as_u16();
-    let text = r.text().map_err(net)?;
+    let status = response.status().as_u16();
+    let text = response.text().map_err(net)?;
 
     if (200..300).contains(&status)
     {
@@ -408,9 +421,10 @@ fn decode<T: DeserializeOwned>(r: reqwest::blocking::Response) -> Result<T>
 
 impl Api for Client
 {
-    fn put_character(&self, c: &Character) -> Result<()>
+    fn put_character(&self, character: &Character) -> Result<()>
     {
-        self.send::<Value>("PUT", &format!("/v1/characters/{}", seg(&c.guid)?), Some(json!({ "name": c.name, "realm": c.realm }))).map(|_| ())
+        self.send::<Value>("PUT", &format!("/v1/characters/{}", seg(&character.guid)?), Some(json!({ "name": character.name, "realm": character.realm })))
+            .map(|_| ())
     }
 
     fn pairings(&self) -> Result<Vec<Pairing>>
@@ -435,18 +449,18 @@ impl Api for Client
 
         match self.send::<Value>("PUT", &path, Some(json!({ "packet": packet, "game_time": game_time, "proto": proto })))
         {
-            Ok(v) =>
+            Ok(value) =>
             {
-                let seq = v["seq"].as_i64().unwrap_or(0);
+                let seq = value["seq"].as_i64().unwrap_or(0);
 
-                Ok(if v["unchanged"].as_bool() == Some(true) { Upload::Unchanged(seq) } else { Upload::Saved(seq) })
+                Ok(if value["unchanged"].as_bool() == Some(true) { Upload::Unchanged(seq) } else { Upload::Saved(seq) })
             }
 
             Err(Error::Api { status: 409, code, body }) if code == "stale" =>
             {
-                let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
 
-                Ok(Upload::Stale { seq: v["seq"].as_i64().unwrap_or(0), game_time: v["game_time"].as_i64().unwrap_or(0) })
+                Ok(Upload::Stale { seq: value["seq"].as_i64().unwrap_or(0), game_time: value["game_time"].as_i64().unwrap_or(0) })
             }
 
             Err(e) => Err(e),
@@ -487,12 +501,12 @@ mod tests
     #[test]
     fn keys_are_43_char_base64url()
     {
-        let k = new_key();
+        let key = new_key();
 
-        assert!(valid_key(&k), "{k}");
-        assert_ne!(k, new_key());
+        assert!(valid_key(&key), "{key}");
+        assert_ne!(key, new_key());
         assert!(!valid_key("short"));
-        assert!(!valid_key(&format!("{}=", &k[..42])));
+        assert!(!valid_key(&format!("{}=", &key[..42])));
     }
 
     #[test]

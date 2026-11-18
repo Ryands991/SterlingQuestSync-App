@@ -23,18 +23,19 @@ fn user_for(server: &str) -> String
 
 pub struct SystemStore;
 
-fn ks(e: keyring::Error) -> Error
+/// A keyring error as a core error.
+fn ks(error: keyring::Error) -> Error
 {
-    Error::Other(format!("couldn't use the system credential store: {e}"))
+    Error::Other(format!("couldn't use the system credential store: {error}"))
 }
 
 impl KeyStore for SystemStore
 {
     fn get(&self, server: &str) -> Result<Option<String>>
     {
-        let e = keyring::Entry::new(SERVICE, &user_for(server)).map_err(ks)?;
+        let entry = keyring::Entry::new(SERVICE, &user_for(server)).map_err(ks)?;
 
-        match e.get_password()
+        match entry.get_password()
         {
             Ok(k) => Ok(Some(k)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -89,12 +90,12 @@ mod tests
     #[test]
     fn memory_store_round_trip()
     {
-        let s = MemoryStore::default();
+        let store = MemoryStore::default();
 
-        assert_eq!(s.get("https://a").unwrap(), None);
-        s.set("https://A/", "k").unwrap();
-        assert_eq!(s.get("https://a").unwrap().as_deref(), Some("k"));
-        s.delete("https://a").unwrap();
-        assert_eq!(s.get("https://a").unwrap(), None);
+        assert_eq!(store.get("https://a").unwrap(), None);
+        store.set("https://A/", "k").unwrap();
+        assert_eq!(store.get("https://a").unwrap().as_deref(), Some("k"));
+        store.delete("https://a").unwrap();
+        assert_eq!(store.get("https://a").unwrap(), None);
     }
 }

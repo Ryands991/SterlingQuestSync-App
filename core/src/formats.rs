@@ -29,14 +29,16 @@ pub static RE_PAIR_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-HJK
 static RE_NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\p{L}[\p{L}' -]{0,23}$").unwrap());
 static RE_REALM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}][\p{L}\p{N}' ()-]{0,63}$").unwrap());
 
-pub fn valid_guid(s: &str) -> bool
+/// A character GUID as the game writes them.
+pub fn valid_guid(text: &str) -> bool
 {
-    RE_GUID.is_match(s)
+    RE_GUID.is_match(text)
 }
 
-pub fn valid_packet(s: &str) -> bool
+/// A quest packet: LibDeflate's print alphabet, within the size cap.
+pub fn valid_packet(text: &str) -> bool
 {
-    !s.is_empty() && s.len() <= MAX_PACKET && RE_PACKET.is_match(s)
+    !text.is_empty() && text.len() <= MAX_PACKET && RE_PACKET.is_match(text)
 }
 
 // ------------------------------------------------------------------ outbox
@@ -77,15 +79,16 @@ pub struct Look
 const CLASSES: [&str; 13] =
     ["WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID", "DEATHKNIGHT", "MONK", "DEMONHUNTER", "EVOKER"];
 
-fn look(t: &Table) -> Look
+/// A character's look (class, race, level and so on), with every field checked.
+fn look(table: &Table) -> Look
 {
     Look
     {
-        level: int(t, "level").filter(|l| (1..=100).contains(l)),
-        class: text(t, "class").filter(|c| CLASSES.contains(c)).map(String::from),
-        race: text(t, "race").filter(|r| RE_NAME.is_match(r)).map(String::from),
-        nick: text(t, "nick").filter(|r| RE_NAME.is_match(r)).map(String::from),
-        seen: int(t, "seen").filter(|s| valid_time(*s)),
+        level: int(table, "level").filter(|l| (1..=100).contains(l)),
+        class: text(table, "class").filter(|c| CLASSES.contains(c)).map(String::from),
+        race: text(table, "race").filter(|r| RE_NAME.is_match(r)).map(String::from),
+        nick: text(table, "nick").filter(|r| RE_NAME.is_match(r)).map(String::from),
+        seen: int(table, "seen").filter(|s| valid_time(*s)),
     }
 }
 
@@ -144,11 +147,11 @@ impl Favs
     {
         let mut out: Vec<String> = Vec::new();
 
-        for g in list
+        for guid in list
         {
-            if valid_guid(&g) && !out.contains(&g) && out.len() < MAX_FAVS
+            if valid_guid(&guid) && !out.contains(&guid) && out.len() < MAX_FAVS
             {
-                out.push(g);
+                out.push(guid);
             }
         }
 
@@ -164,19 +167,22 @@ pub struct Outbox
     pub skipped: Vec<String>,
 }
 
-fn int(t: &Table, k: &str) -> Option<i64>
+/// A whole number field from a Lua table.
+fn int(table: &Table, key: &str) -> Option<i64>
 {
-    t.get(k).and_then(Value::as_i64)
+    table.get(key).and_then(Value::as_i64)
 }
 
-fn text<'a>(t: &'a Table, k: &str) -> Option<&'a str>
+/// A text field from a Lua table.
+fn text<'a>(table: &'a Table, key: &str) -> Option<&'a str>
 {
-    t.get(k).and_then(Value::as_str)
+    table.get(key).and_then(Value::as_str)
 }
 
-fn valid_time(t: i64) -> bool
+/// A Unix time in a sane range.
+fn valid_time(time: i64) -> bool
 {
-    (1_000_000_000..4_000_000_000).contains(&t)
+    (1_000_000_000..4_000_000_000).contains(&time)
 }
 
 /// Reads the outbox file. Anything that doesn't validate is skipped, never guessed at.
@@ -201,9 +207,9 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
         None => return Ok(out),
     };
 
-    for (guid, v) in &chars.map
+    for (guid, value) in &chars.map
     {
-        let Some(c) = v.as_table() else { continue };
+        let Some(fields) = value.as_table() else { continue };
 
         if !valid_guid(guid)
         {
@@ -211,10 +217,10 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
             continue;
         }
 
-        let name = text(c, "name").unwrap_or("");
-        let realm = text(c, "realm").unwrap_or("");
-        let saved = int(c, "saved").unwrap_or(0);
-        let proto = int(c, "proto").unwrap_or(0);
+        let name = text(fields, "name").unwrap_or("");
+        let realm = text(fields, "realm").unwrap_or("");
+        let saved = int(fields, "saved").unwrap_or(0);
+        let proto = int(fields, "proto").unwrap_or(0);
 
         if !RE_NAME.is_match(name) || !RE_REALM.is_match(realm) || !valid_time(saved) || !(1..=10_000).contains(&proto)
         {
@@ -222,7 +228,7 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
             continue;
         }
 
-        let self_packet = match text(c, "self")
+        let self_packet = match text(fields, "self")
         {
             Some(p) if valid_packet(p) => Some(p.to_string()),
             Some(_) =>
@@ -236,20 +242,20 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
 
         let mut partners = Vec::new();
 
-        if let Some(pt) = c.get("partners").and_then(Value::as_table)
+        if let Some(partner_table) = fields.get("partners").and_then(Value::as_table)
         {
-            for (pg, pv) in &pt.map
+            for (partner_guid, partner_value) in &partner_table.map
             {
-                let Some(p) = pv.as_table() else { continue };
+                let Some(partner_fields) = partner_value.as_table() else { continue };
 
-                if !valid_guid(pg) || pg == guid
+                if !valid_guid(partner_guid) || partner_guid == guid
                 {
                     out.skipped.push(format!("{guid}: partner with a bad GUID"));
                     continue;
                 }
 
-                let removed = p.get("removed").and_then(Value::as_bool).unwrap_or(false);
-                let change = int(p, "change").unwrap_or(0);
+                let removed = partner_fields.get("removed").and_then(Value::as_bool).unwrap_or(false);
+                let change = int(partner_fields, "change").unwrap_or(0);
 
                 if change < 0
                 {
@@ -257,7 +263,7 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
                     continue;
                 }
 
-                let packet = match text(p, "packet")
+                let packet = match text(partner_fields, "packet")
                 {
                     Some(s) if valid_packet(s) => Some(s.to_string()),
                     Some(_) =>
@@ -269,8 +275,8 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
                     None => None,
                 };
 
-                let name = text(p, "name").filter(|n| RE_NAME.is_match(n)).map(String::from);
-                let app = match p.get("app")
+                let name = text(partner_fields, "name").filter(|n| RE_NAME.is_match(n)).map(String::from);
+                let app = match partner_fields.get("app")
                 {
                     Some(v) if v.as_bool() == Some(false) => PartnerApp::No,
                     Some(v) => match v.as_str()
@@ -286,21 +292,30 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
                     None => PartnerApp::Unknown,
                 };
 
-                partners.push(PartnerOut { guid: pg.clone(), packet: if removed { None } else { packet }, change, removed, name, app, look: look(p) });
+                partners.push(PartnerOut
+                {
+                    guid: partner_guid.clone(),
+                    packet: if removed { None } else { packet },
+                    change,
+                    removed,
+                    name,
+                    app,
+                    look: look(partner_fields),
+                });
             }
         }
 
         let mut applied = BTreeMap::new();
 
-        if let Some(at) = c.get("applied").and_then(Value::as_table)
+        if let Some(applied_table) = fields.get("applied").and_then(Value::as_table)
         {
-            for (k, v) in &at.map
+            for (key, value) in &applied_table.map
             {
-                if let Some(n) = v.as_i64()
+                if let Some(number) = value.as_i64()
                 {
-                    if valid_guid(k) && n >= 0
+                    if valid_guid(key) && number >= 0
                     {
-                        applied.insert(k.clone(), n);
+                        applied.insert(key.clone(), number);
                     }
                 }
             }
@@ -308,11 +323,11 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
 
         let mut codes = BTreeMap::new();
 
-        if let Some(ct) = c.get("codes").and_then(Value::as_table)
+        if let Some(code_table) = fields.get("codes").and_then(Value::as_table)
         {
-            for (from, v) in &ct.map
+            for (from, value) in &code_table.map
             {
-                let code = v.as_table().and_then(|t| text(t, "code")).or_else(|| v.as_str());
+                let code = value.as_table().and_then(|t| text(t, "code")).or_else(|| value.as_str());
 
                 if let Some(code) = code
                 {
@@ -329,7 +344,7 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
             }
         }
 
-        let favs = match (c.get("favs").and_then(Value::as_table), int(c, "favs_change"))
+        let favs = match (fields.get("favs").and_then(Value::as_table), int(fields, "favs_change"))
         {
             (Some(t), Some(ch)) if valid_time(ch) => Some(Favs::clean(t.list.iter().filter_map(|v| v.as_str().map(String::from)).filter(|g| g != guid), ch)),
             (Some(_), Some(_)) =>
@@ -346,8 +361,8 @@ pub fn parse_outbox(file_text: &str) -> Result<Outbox>
         out.characters.push(CharacterOut
         {
             favs,
-            look: look(c),
-            sterling: text(c, "sterling").filter(|v| valid_version(v)).map(String::from),
+            look: look(fields),
+            sterling: text(fields, "sterling").filter(|v| valid_version(v)).map(String::from),
             codes,
             guid: guid.clone(),
             name: name.to_string(),
@@ -425,27 +440,27 @@ impl Inbox
 {
     pub fn set_offers(&mut self, to: &str, offers: Vec<InOffer>) -> bool
     {
-        let c = self.chars.entry(to.to_string()).or_default();
+        let character = self.chars.entry(to.to_string()).or_default();
 
-        if c.offers == offers
+        if character.offers == offers
         {
             return false;
         }
 
-        c.offers = offers;
+        character.offers = offers;
         true
     }
 
     pub fn set_favs(&mut self, to: &str, favs: Option<Favs>) -> bool
     {
-        let c = self.chars.entry(to.to_string()).or_default();
+        let entry = self.chars.entry(to.to_string()).or_default();
 
-        if c.favs == favs
+        if entry.favs == favs
         {
             return false;
         }
 
-        c.favs = favs;
+        entry.favs = favs;
         true
     }
 }
@@ -474,58 +489,60 @@ pub struct AppInfo
 
 static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4})?$").unwrap());
 
-pub fn valid_version(v: &str) -> bool
+/// A version like 0.1.25.
+pub fn valid_version(version: &str) -> bool
 {
-    RE_VERSION.is_match(v)
+    RE_VERSION.is_match(version)
 }
 
 impl Inbox
 {
     /// Adds a packet, replacing an older one from the same sender and kind. Never removes otherwise.
-    pub fn put_packet(&mut self, to: &str, p: InPacket) -> bool
+    pub fn put_packet(&mut self, to: &str, packet: InPacket) -> bool
     {
-        let c = self.chars.entry(to.to_string()).or_default();
+        let character = self.chars.entry(to.to_string()).or_default();
 
-        if let Some(old) = c.packets.iter_mut().find(|o| o.from == p.from && o.kind == p.kind)
+        if let Some(old) = character.packets.iter_mut().find(|o| o.from == packet.from && o.kind == packet.kind)
         {
-            if old.seq >= p.seq
+            if old.seq >= packet.seq
             {
                 return false;
             }
 
-            *old = p;
+            *old = packet;
         }
 
         else
         {
-            c.packets.push(p);
+            character.packets.push(packet);
         }
 
-        c.packets.sort_by_key(|x| x.seq);
+        character.packets.sort_by_key(|x| x.seq);
         true
     }
 
     pub fn set_pairs(&mut self, to: &str, pairs: Vec<InPair>) -> bool
     {
-        let c = self.chars.entry(to.to_string()).or_default();
+        let character = self.chars.entry(to.to_string()).or_default();
 
-        if c.pairs == pairs
+        if character.pairs == pairs
         {
             return false;
         }
 
-        c.pairs = pairs;
+        character.pairs = pairs;
         true
     }
 }
 
+/// Checks every value against the allowlist before the inbox is written.
 fn check_inbox(inbox: &Inbox) -> Result<()>
 {
     let bad = |m: &str| Err(Error::Refused(format!("inbox value failed the allowlist: {m}")));
 
-    if let Some(a) = &inbox.app
+    if let Some(app_info) = &inbox.app
     {
-        let ok = valid_version(&a.version) && [&a.latest, &a.sterling_latest].into_iter().flatten().all(|v| valid_version(v));
+        let ok = valid_version(&app_info.version) && [&app_info.latest, &app_info.sterling_latest].into_iter().flatten().all(|v| valid_version(v));
 
         if !ok
         {
@@ -533,47 +550,51 @@ fn check_inbox(inbox: &Inbox) -> Result<()>
         }
     }
 
-    for (to, c) in &inbox.chars
+    for (to, character) in &inbox.chars
     {
         if !valid_guid(to)
         {
             return bad("target GUID");
         }
 
-        for p in &c.packets
+        for in_packet in &character.packets
         {
-            if !valid_guid(&p.from) || p.seq < 0 || !valid_time(p.time) || !(1..=10_000).contains(&p.proto) || !valid_packet(&p.data)
+            if !valid_guid(&in_packet.from)
+                || in_packet.seq < 0
+                || !valid_time(in_packet.time)
+                || !(1..=10_000).contains(&in_packet.proto)
+                || !valid_packet(&in_packet.data)
             {
                 return bad("packet");
             }
         }
 
-        for o in &c.offers
+        for in_offer in &character.offers
         {
-            if !valid_guid(&o.partner) || !RE_PAIR_CODE.is_match(&o.code) || !valid_time(o.expires)
+            if !valid_guid(&in_offer.partner) || !RE_PAIR_CODE.is_match(&in_offer.code) || !valid_time(in_offer.expires)
             {
                 return bad("offer");
             }
         }
 
-        if let Some(f) = &c.favs
+        if let Some(favs) = &character.favs
         {
-            if f.list.len() > MAX_FAVS || !f.list.iter().all(|g| valid_guid(g)) || !valid_time(f.change)
+            if favs.list.len() > MAX_FAVS || !favs.list.iter().all(|g| valid_guid(g)) || !valid_time(favs.change)
             {
                 return bad("favourites");
             }
         }
 
-        for pr in &c.pairs
+        for in_pair in &character.pairs
         {
-            if !valid_guid(&pr.partner) || pr.change < 0
+            if !valid_guid(&in_pair.partner) || in_pair.change < 0
             {
                 return bad("pair");
             }
 
-            for k in [&pr.my_key, &pr.partner_key].into_iter().flatten()
+            for pair_key in [&in_pair.my_key, &in_pair.partner_key].into_iter().flatten()
             {
-                if !RE_PAIR_KEY.is_match(k)
+                if !RE_PAIR_KEY.is_match(pair_key)
                 {
                     return bad("pair key");
                 }
@@ -590,45 +611,51 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String>
 {
     check_inbox(inbox)?;
 
-    let mut s = String::new();
+    let mut lua = String::new();
 
-    s.push_str("-- Written by the Sterling Quest Sync Companion app. Do not edit; it is replaced on every sync.\n");
-    s.push_str("SterlingQuestSync_Inbox = {\n");
-    s.push_str(&format!("  format = {},\n  written = {},\n", FORMAT, written));
+    lua.push_str("-- Written by the Sterling Quest Sync Companion app. Do not edit; it is replaced on every sync.\n");
+    lua.push_str("SterlingQuestSync_Inbox = {\n");
+    lua.push_str(&format!("  format = {},\n  written = {},\n", FORMAT, written));
 
-    if let Some(a) = &inbox.app
+    if let Some(app_info) = &inbox.app
     {
-        let v = |x: &Option<String>| x.as_ref().map(|s| format!("\"{s}\"")).unwrap_or_else(|| "nil".into());
+        let quoted = |x: &Option<String>| x.as_ref().map(|s| format!("\"{s}\"")).unwrap_or_else(|| "nil".into());
 
-        s.push_str(&format!("  app = {{ version = \"{}\", latest = {}, sterling_latest = {} }},\n", a.version, v(&a.latest), v(&a.sterling_latest)));
+        lua.push_str(&format!
+        (
+            "  app = {{ version = \"{}\", latest = {}, sterling_latest = {} }},\n",
+            app_info.version,
+            quoted(&app_info.latest),
+            quoted(&app_info.sterling_latest)
+        ));
     }
 
-    s.push_str("  chars = {\n");
+    lua.push_str("  chars = {\n");
 
-    for (to, c) in &inbox.chars
+    for (to, character) in &inbox.chars
     {
-        s.push_str(&format!("    [\"{to}\"] = {{\n      packets = {{\n"));
+        lua.push_str(&format!("    [\"{to}\"] = {{\n      packets = {{\n"));
 
-        for p in &c.packets
+        for packet in &character.packets
         {
-            let kind = match p.kind
+            let kind = match packet.kind
             {
                 Kind::Partner => "partner",
                 Kind::SelfCopy => "self",
             };
 
-            s.push_str(&format!
+            lua.push_str(&format!
             (
                 "        {{ seq = {}, from = \"{}\", kind = \"{}\", time = {}, proto = {}, data = \"{}\" }},\n",
-                p.seq, p.from, kind, p.time, p.proto, p.data
+                packet.seq, packet.from, kind, packet.time, packet.proto, packet.data
             ));
         }
 
-        s.push_str("      },\n      pairs = {\n");
+        lua.push_str("      },\n      pairs = {\n");
 
-        for pr in &c.pairs
+        for pair in &character.pairs
         {
-            let status = match pr.status
+            let status = match pair.status
             {
                 PairStatus::Active => "active",
                 PairStatus::Ended => "ended",
@@ -640,43 +667,43 @@ pub fn render_inbox(inbox: &Inbox, written: i64) -> Result<String>
                 None => "nil".to_string(),
             };
 
-            s.push_str(&format!
+            lua.push_str(&format!
             (
                 "        {{ partner = \"{}\", my_key = {}, partner_key = {}, status = \"{}\", change = {} }},\n",
-                pr.partner,
-                key(&pr.my_key),
-                key(&pr.partner_key),
+                pair.partner,
+                key(&pair.my_key),
+                key(&pair.partner_key),
                 status,
-                pr.change
+                pair.change
             ));
         }
 
-        s.push_str("      },\n      offers = {\n");
+        lua.push_str("      },\n      offers = {\n");
 
-        for o in &c.offers
+        for offer in &character.offers
         {
-            s.push_str(&format!("        {{ partner = \"{}\", code = \"{}\", expires = {} }},\n", o.partner, o.code, o.expires));
+            lua.push_str(&format!("        {{ partner = \"{}\", code = \"{}\", expires = {} }},\n", offer.partner, offer.code, offer.expires));
         }
 
-        s.push_str("      },\n");
+        lua.push_str("      },\n");
 
-        if let Some(f) = &c.favs
+        if let Some(fav_list) = &character.favs
         {
-            s.push_str("      favs = {");
+            lua.push_str("      favs = {");
 
-            for g in &f.list
+            for guid in &fav_list.list
             {
-                s.push_str(&format!(" \"{g}\","));
+                lua.push_str(&format!(" \"{guid}\","));
             }
 
-            s.push_str(&format!(" }},\n      favs_change = {},\n", f.change));
+            lua.push_str(&format!(" }},\n      favs_change = {},\n", fav_list.change));
         }
 
-        s.push_str("    },\n");
+        lua.push_str("    },\n");
     }
 
-    s.push_str("  },\n}\n");
-    Ok(s)
+    lua.push_str("  },\n}\n");
+    Ok(lua)
 }
 
 /// The companion add-on's TOC, installed by the app.
@@ -698,6 +725,7 @@ pub fn companion_toc() -> String
     .join("\n")
 }
 
+/// An inbox with nothing in it.
 pub fn empty_inbox_lua() -> String
 {
     render_inbox(&Inbox::default(), 1_000_000_000).unwrap()
@@ -742,29 +770,29 @@ mod tests
     #[test]
     fn reads_and_validates_the_outbox()
     {
-        let o = parse_outbox(&sample_outbox()).unwrap();
+        let outbox = parse_outbox(&sample_outbox()).unwrap();
 
-        assert_eq!(o.characters.len(), 1);
+        assert_eq!(outbox.characters.len(), 1);
 
-        let c = &o.characters[0];
+        let character = &outbox.characters[0];
 
-        assert_eq!(c.name, "Kaelith Emberfall");
-        assert_eq!(c.self_packet.as_deref(), Some("SELFabc123"));
+        assert_eq!(character.name, "Kaelith Emberfall");
+        assert_eq!(character.self_packet.as_deref(), Some("SELFabc123"));
 
-        let bran = c.partners.iter().find(|p| p.guid == BRAN).unwrap();
+        let bran = character.partners.iter().find(|p| p.guid == BRAN).unwrap();
 
         assert_eq!(bran.packet.as_deref(), Some("STO1abc(def)"));
 
-        let removed = c.partners.iter().find(|p| p.guid == "Player-6800-0000BEEF").unwrap();
+        let removed = character.partners.iter().find(|p| p.guid == "Player-6800-0000BEEF").unwrap();
 
         assert!(removed.removed && removed.packet.is_none());
 
-        let bad = c.partners.iter().find(|p| p.guid == "Player-6800-00000BAD").unwrap();
+        let bad = character.partners.iter().find(|p| p.guid == "Player-6800-00000BAD").unwrap();
 
         assert!(bad.packet.is_none());
-        assert!(!c.partners.iter().any(|p| p.guid == "not-a-guid"));
-        assert_eq!(c.applied.get(BRAN), Some(&48213));
-        assert!(o.skipped.len() >= 3);
+        assert!(!character.partners.iter().any(|p| p.guid == "not-a-guid"));
+        assert_eq!(character.applied.get(BRAN), Some(&48213));
+        assert!(outbox.skipped.len() >= 3);
     }
 
     #[test]
@@ -780,14 +808,14 @@ mod tests
             row("Player-6800-0000000D", ", [\"app\"] = \"1.0; os.exit()\""),
         );
 
-        let o = parse_outbox(&text).unwrap();
-        let app = |g: &str| o.characters[0].partners.iter().find(|p| p.guid == g).unwrap().app.clone();
+        let outbox = parse_outbox(&text).unwrap();
+        let app = |g: &str| outbox.characters[0].partners.iter().find(|p| p.guid == g).unwrap().app.clone();
 
         assert_eq!(app("Player-6800-0000000A"), PartnerApp::Has("0.1.9".into()));
         assert_eq!(app("Player-6800-0000000B"), PartnerApp::No);
         assert_eq!(app("Player-6800-0000000C"), PartnerApp::Unknown);
         assert_eq!(app("Player-6800-0000000D"), PartnerApp::Unknown, "bad version ignored");
-        assert!(o.skipped.iter().any(|s| s.contains("bad app version")));
+        assert!(outbox.skipped.iter().any(|s| s.contains("bad app version")));
     }
 
     #[test]
@@ -798,36 +826,36 @@ mod tests
             "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"level\"] = 41, [\"class\"] = \"DRUID\", [\"race\"] = \"Troll\", [\"sterling\"] = \"0.2.40\", [\"partners\"] = {{ [\"{BRAN}\"] = {{ [\"packet\"] = \"AB\", [\"change\"] = 1, [\"level\"] = 900, [\"class\"] = \"<b>MAGE\", [\"race\"] = \"Night Elf\", [\"nick\"] = \"Bran\", [\"seen\"] = 1794770100 }} }} }} }} }}"
         );
 
-        let o = parse_outbox(&text).unwrap();
-        let c = &o.characters[0];
+        let outbox = parse_outbox(&text).unwrap();
+        let character = &outbox.characters[0];
 
-        assert_eq!(c.look, Look { level: Some(41), class: Some("DRUID".into()), race: Some("Troll".into()), nick: None, seen: None });
-        assert_eq!(c.sterling.as_deref(), Some("0.2.40"));
+        assert_eq!(character.look, Look { level: Some(41), class: Some("DRUID".into()), race: Some("Troll".into()), nick: None, seen: None });
+        assert_eq!(character.sterling.as_deref(), Some("0.2.40"));
 
-        let p = &c.partners[0].look;
+        let look = &character.partners[0].look;
 
-        assert_eq!(p.level, None, "out of range");
-        assert_eq!(p.class, None, "not a class token");
-        assert_eq!(p.race.as_deref(), Some("Night Elf"));
-        assert_eq!(p.nick.as_deref(), Some("Bran"));
-        assert_eq!(p.seen, Some(1794770100));
+        assert_eq!(look.level, None, "out of range");
+        assert_eq!(look.class, None, "not a class token");
+        assert_eq!(look.race.as_deref(), Some("Night Elf"));
+        assert_eq!(look.nick.as_deref(), Some("Bran"));
+        assert_eq!(look.seen, Some(1794770100));
     }
 
     #[test]
     fn reads_favourites_up_to_five()
     {
-        let gs: Vec<String> = (0..7).map(|i| format!("\"Player-6800-0000000{i}\"")).collect();
+        let guids: Vec<String> = (0..7).map(|i| format!("\"Player-6800-0000000{i}\"")).collect();
         let text = format!
         (
             "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"favs\"] = {{ \"bad\", \"{ME}\", \"Player-6800-00000000\", {} }}, [\"favs_change\"] = 1794770000 }} }} }}",
-            gs.join(", ")
+            guids.join(", ")
         );
 
-        let f = parse_outbox(&text).unwrap().characters[0].favs.clone().unwrap();
+        let favs = parse_outbox(&text).unwrap().characters[0].favs.clone().unwrap();
 
-        assert_eq!(f.list.len(), 5, "bad GUID, self and repeats dropped, capped at 5");
-        assert_eq!(f.list[0], "Player-6800-00000000");
-        assert_eq!(f.change, 1794770000);
+        assert_eq!(favs.list.len(), 5, "bad GUID, self and repeats dropped, capped at 5");
+        assert_eq!(favs.list[0], "Player-6800-00000000");
+        assert_eq!(favs.change, 1794770000);
     }
 
     #[test]
@@ -838,10 +866,10 @@ mod tests
             "SterlingQuestSyncOut = {{ [\"format\"] = 1, [\"characters\"] = {{ [\"{ME}\"] = {{ [\"name\"] = \"Kaelith Emberfall\", [\"realm\"] = \"R\", [\"saved\"] = 1794770000, [\"proto\"] = 6, [\"favs\"] = {{ }} }} }} }}"
         );
 
-        let o = parse_outbox(&text).unwrap();
+        let outbox = parse_outbox(&text).unwrap();
 
-        assert!(o.characters[0].favs.is_none());
-        assert!(o.skipped.is_empty(), "not an error: {:?}", o.skipped);
+        assert!(outbox.characters[0].favs.is_none());
+        assert!(outbox.skipped.is_empty(), "not an error: {:?}", outbox.skipped);
     }
 
     #[test]
@@ -853,10 +881,10 @@ mod tests
 
     fn sample_inbox() -> Inbox
     {
-        let mut ib = Inbox::default();
+        let mut inbox = Inbox::default();
 
-        ib.put_packet(ME, InPacket { seq: 10, from: BRAN.into(), kind: Kind::Partner, time: 1794770000, proto: 6, data: "AAAA".into() });
-        ib.set_pairs
+        inbox.put_packet(ME, InPacket { seq: 10, from: BRAN.into(), kind: Kind::Partner, time: 1794770000, proto: 6, data: "AAAA".into() });
+        inbox.set_pairs
         (
             ME,
             vec![InPair
@@ -869,22 +897,22 @@ mod tests
             }],
         );
 
-        ib
+        inbox
     }
 
     #[test]
     fn inbox_renders_to_lua_our_own_parser_reads_back()
     {
         let lua = render_inbox(&sample_inbox(), 1794770123).unwrap();
-        let v = parse_saved_variables(&lua).unwrap();
-        let root = v["SterlingQuestSync_Inbox"].as_table().unwrap();
+        let vars = parse_saved_variables(&lua).unwrap();
+        let root = vars["SterlingQuestSync_Inbox"].as_table().unwrap();
 
         assert_eq!(root.get("format").unwrap().as_i64(), Some(1));
 
         let me = root.get("chars").unwrap().as_table().unwrap().get(ME).unwrap().as_table().unwrap();
-        let p = &me.get("packets").unwrap().as_table().unwrap().list[0];
+        let packet = &me.get("packets").unwrap().as_table().unwrap().list[0];
 
-        assert_eq!(p.as_table().unwrap().get("data").unwrap().as_str(), Some("AAAA"));
+        assert_eq!(packet.as_table().unwrap().get("data").unwrap().as_str(), Some("AAAA"));
         assert!(!lua.contains("Kaelith Emberfall"), "no names in the inbox");
     }
 
@@ -893,9 +921,9 @@ mod tests
     {
         for data in ["x\"]] os.exit() --", "abc\ndef", "a b", "a'b", "a\\b", ""]
         {
-            let mut ib = Inbox::default();
+            let mut inbox = Inbox::default();
 
-            ib.chars.entry(ME.into()).or_default().packets.push(InPacket
+            inbox.chars.entry(ME.into()).or_default().packets.push(InPacket
             {
                 seq: 1,
                 from: BRAN.into(),
@@ -905,58 +933,58 @@ mod tests
                 data: data.into(),
             });
 
-            assert!(render_inbox(&ib, 1794770000).is_err(), "{data:?}");
+            assert!(render_inbox(&inbox, 1794770000).is_err(), "{data:?}");
         }
 
-        let mut ib = Inbox::default();
+        let mut inbox = Inbox::default();
 
-        ib.chars.entry("Player-1-0\"]] x".into()).or_default();
-        assert!(render_inbox(&ib, 1794770000).is_err());
+        inbox.chars.entry("Player-1-0\"]] x".into()).or_default();
+        assert!(render_inbox(&inbox, 1794770000).is_err());
 
-        let mut ib = sample_inbox();
+        let mut inbox = sample_inbox();
 
-        ib.chars.get_mut(ME).unwrap().pairs[0].my_key = Some("abc\"..os.exit()".into());
-        assert!(render_inbox(&ib, 1794770000).is_err());
+        inbox.chars.get_mut(ME).unwrap().pairs[0].my_key = Some("abc\"..os.exit()".into());
+        assert!(render_inbox(&inbox, 1794770000).is_err());
 
-        let mut ib = sample_inbox();
+        let mut inbox = sample_inbox();
 
-        ib.chars.get_mut(ME).unwrap().packets[0].from = "Player-6800-0A1B2C3D\"".into();
-        assert!(render_inbox(&ib, 1794770000).is_err());
+        inbox.chars.get_mut(ME).unwrap().packets[0].from = "Player-6800-0A1B2C3D\"".into();
+        assert!(render_inbox(&inbox, 1794770000).is_err());
     }
 
     #[test]
     fn newer_packets_replace_older_and_never_go_backwards()
     {
-        let mut ib = sample_inbox();
+        let mut inbox = sample_inbox();
         let older = InPacket { seq: 5, from: BRAN.into(), kind: Kind::Partner, time: 1794770000, proto: 6, data: "OLD".into() };
 
-        assert!(!ib.put_packet(ME, older));
+        assert!(!inbox.put_packet(ME, older));
 
         let newer = InPacket { seq: 20, from: BRAN.into(), kind: Kind::Partner, time: 1794770100, proto: 6, data: "NEW".into() };
 
-        assert!(ib.put_packet(ME, newer));
-        assert_eq!(ib.chars[ME].packets.len(), 1);
-        assert_eq!(ib.chars[ME].packets[0].data, "NEW");
+        assert!(inbox.put_packet(ME, newer));
+        assert_eq!(inbox.chars[ME].packets.len(), 1);
+        assert_eq!(inbox.chars[ME].packets[0].data, "NEW");
     }
 
     #[test]
     fn app_versions_go_in_and_bad_ones_are_refused()
     {
-        let mut ib = sample_inbox();
+        let mut inbox = sample_inbox();
 
-        ib.app = Some(AppInfo { version: "0.1.2".into(), latest: Some("0.1.3".into()), sterling_latest: None });
+        inbox.app = Some(AppInfo { version: "0.1.2".into(), latest: Some("0.1.3".into()), sterling_latest: None });
 
-        let lua = render_inbox(&ib, 1794770123).unwrap();
-        let v = parse_saved_variables(&lua).unwrap();
-        let app = v["SterlingQuestSync_Inbox"].as_table().unwrap().get("app").unwrap().as_table().unwrap();
+        let lua = render_inbox(&inbox, 1794770123).unwrap();
+        let vars = parse_saved_variables(&lua).unwrap();
+        let app = vars["SterlingQuestSync_Inbox"].as_table().unwrap().get("app").unwrap().as_table().unwrap();
 
         assert_eq!(app.get("version").unwrap().as_str(), Some("0.1.2"));
         assert_eq!(app.get("latest").unwrap().as_str(), Some("0.1.3"));
 
         for bad in ["0.1.3\" os.exit() --", "v0.1", "", "1.2.3.4"]
         {
-            ib.app = Some(AppInfo { version: "0.1.2".into(), latest: Some(bad.into()), sterling_latest: None });
-            assert!(render_inbox(&ib, 1794770123).is_err(), "{bad:?}");
+            inbox.app = Some(AppInfo { version: "0.1.2".into(), latest: Some(bad.into()), sterling_latest: None });
+            assert!(render_inbox(&inbox, 1794770123).is_err(), "{bad:?}");
         }
     }
 

@@ -3,6 +3,8 @@
 //! The web page has no file or shell access. It can only call the typed commands below, and it
 //! never hands the app a path: folders are picked in a native dialog on the Rust side and checked.
 
+// Sterling code style puts a blank line between "}" and "else" on purpose.
+#![allow(clippy::suspicious_else_formatting)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::BTreeMap;
@@ -41,11 +43,13 @@ const COMPANION_FILES: &[(&str, &[u8])] = &
     ("icon.tga", include_bytes!("../companion/icon.tga")),
 ];
 
+/// Unix time in seconds.
 fn now() -> i64
 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// The app's own folder for settings, state and backups.
 fn app_data() -> PathBuf
 {
     dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("SterlingQuestSync")
@@ -130,30 +134,33 @@ impl Default for Settings
     }
 }
 
+/// This PC's name, used as its label when the person doesn't give one.
 fn default_label() -> String
 {
-    let h = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_else(|_| "My PC".into());
+    let host = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_else(|_| "My PC".into());
 
-    clean_label(&h).unwrap_or_else(|| "My PC".into())
+    clean_label(&host).unwrap_or_else(|| "My PC".into())
 }
 
 /// Labels the server accepts: letters, digits, spaces and a few marks, up to 40.
-fn clean_label(s: &str) -> Option<String>
+fn clean_label(raw: &str) -> Option<String>
 {
-    let t: String = s.trim().chars().filter(|c| c.is_alphanumeric() || " _.'()-".contains(*c)).take(40).collect();
-    let t = t.trim().to_string();
+    let cleaned: String = raw.trim().chars().filter(|c| c.is_alphanumeric() || " _.'()-".contains(*c)).take(40).collect();
+    let cleaned = cleaned.trim().to_string();
 
-    t.chars().next().filter(|c| c.is_alphanumeric()).map(|_| t)
+    cleaned.chars().next().filter(|c| c.is_alphanumeric()).map(|_| cleaned)
 }
 
+/// Reads one of the app's JSON files, or the default if it's missing or broken.
 fn load_json<T: for<'de> Deserialize<'de> + Default>(name: &str) -> T
 {
     fs::read_to_string(app_data().join(name)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
-fn save_json<T: Serialize>(name: &str, v: &T) -> Result<(), String>
+/// Writes one of the app's JSON files.
+fn save_json<T: Serialize>(name: &str, value: &T) -> Result<(), String>
 {
-    let text = serde_json::to_string_pretty(v).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
 
     write_app_file(&app_data(), name, text.as_bytes()).map_err(msg)
 }
@@ -220,11 +227,13 @@ struct AppState
     rewatch: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
-fn msg(e: Error) -> String
+/// A core error as the text the window shows.
+fn msg(error: Error) -> String
 {
-    e.to_string()
+    error.to_string()
 }
 
+/// Opens the game folder with its safe file access and saved sync state.
 fn open_session(game: &PathBuf) -> Result<Session, String>
 {
     let fs_ = SafeFs::new(game, &app_data()).map_err(msg)?;
@@ -235,11 +244,11 @@ fn open_session(game: &PathBuf) -> Result<Session, String>
 
 impl AppState
 {
-    fn client(&self, s: &Settings) -> Result<Client, String>
+    fn client(&self, settings: &Settings) -> Result<Client, String>
     {
-        let key = self.keys.get(&s.server).map_err(msg)?.ok_or("This PC hasn't joined yet.")?;
+        let key = self.keys.get(&settings.server).map_err(msg)?.ok_or("This PC hasn't joined yet.")?;
 
-        Client::new(&s.server, &key).map_err(msg)
+        Client::new(&settings.server, &key).map_err(msg)
     }
 }
 
@@ -256,28 +265,29 @@ impl Inner
     /// Display names for GUIDs: your own characters and your partners.
     fn names(&self) -> BTreeMap<String, String>
     {
-        let mut m = BTreeMap::new();
+        let mut map = BTreeMap::new();
 
-        if let Some(s) = &self.session
+        if let Some(session) = &self.session
         {
-            for (g, c) in &s.state.listed
+            for (guid, character) in &session.state.listed
             {
-                m.insert(g.clone(), c.name.clone());
+                map.insert(guid.clone(), character.name.clone());
             }
 
-            for p in &s.state.pairs
+            for partner in &session.state.pairs
             {
-                if !p.partner_name.is_empty()
+                if !partner.partner_name.is_empty()
                 {
-                    m.insert(p.partner_guid.clone(), p.partner_name.clone());
+                    map.insert(partner.partner_guid.clone(), partner.partner_name.clone());
                 }
             }
         }
 
-        m
+        map
     }
 }
 
+/// Reads every account's outbox, plus a note for each one that couldn't be read.
 fn read_outboxes(fs_: &SafeFs) -> (Vec<Outbox>, Vec<String>)
 {
     let mut out = Vec::new();
@@ -294,9 +304,9 @@ fn read_outboxes(fs_: &SafeFs) -> (Vec<Outbox>, Vec<String>)
             continue;
         }
 
-        if let Ok(t) = fs::read_to_string(&file)
+        if let Ok(text) = fs::read_to_string(&file)
         {
-            match parse_outbox(&t)
+            match parse_outbox(&text)
             {
                 Ok(o) => out.push(o),
                 Err(e) => problems.push(e.to_string()),
@@ -403,10 +413,11 @@ struct Status
     activity: Vec<Activity>,
 }
 
-fn build_status(st: &AppState) -> Status
+/// Everything the window shows, gathered in one snapshot.
+fn build_status(state: &AppState) -> Status
 {
-    let inner = st.inner.lock().unwrap();
-    let s = &inner.settings;
+    let inner = state.inner.lock().unwrap();
+    let settings = &inner.settings;
     let mut characters: Vec<CharStatus> = Vec::new();
     let mut companion_installed = false;
     let mut last_sync = None;
@@ -428,13 +439,13 @@ fn build_status(st: &AppState) -> Status
             outboxes.iter().flat_map(|o| &o.characters).map(|c| (c.guid.as_str(), (c.saved, &c.applied))).collect();
         // Characters seen in the outbox, plus any listed on the server from another PC.
         let mut guids: Vec<(String, String, String)> =
-            outboxes.iter().flat_map(|o| &o.characters).map(|c| (c.guid.clone(), c.name.clone(), c.realm.clone())).collect();
+            outboxes.iter().flat_map(|o| &o.characters).map(|listed| (listed.guid.clone(), listed.name.clone(), listed.realm.clone())).collect();
 
-        for (g, c) in &sess.state.listed
+        for (char_guid, listed) in &sess.state.listed
         {
-            if !guids.iter().any(|x| &x.0 == g)
+            if !guids.iter().any(|x| &x.0 == char_guid)
             {
-                guids.push((g.clone(), c.name.clone(), c.realm.clone()));
+                guids.push((char_guid.clone(), listed.name.clone(), listed.realm.clone()));
             }
         }
 
@@ -449,22 +460,22 @@ fn build_status(st: &AppState) -> Status
                 .pairs
                 .iter()
                 .filter(|p| p.my_guid == guid)
-                .map(|p|
+                .map(|partner|
                 {
-                    let last = inbox.and_then(|ch| ch.packets.iter().find(|x| x.from == p.partner_guid && x.kind == Kind::Partner));
+                    let last = inbox.and_then(|ch| ch.packets.iter().find(|x| x.from == partner.partner_guid && x.kind == Kind::Partner));
 
                     PartnerStatus
                     {
-                        pairing_id: p.id.clone(),
-                        guid: p.partner_guid.clone(),
-                        name: p.partner_name.clone(),
-                        realm: p.partner_realm.clone(),
-                        active: p.active,
-                        ended_reason: p.ended_reason.clone(),
-                        ended_at: p.ended_at,
+                        pairing_id: partner.id.clone(),
+                        guid: partner.partner_guid.clone(),
+                        name: partner.partner_name.clone(),
+                        realm: partner.partner_realm.clone(),
+                        active: partner.active,
+                        ended_reason: partner.ended_reason.clone(),
+                        ended_at: partner.ended_at,
                         last_copy: last.map(|x| x.time),
-                        applied: last.is_some_and(|x| applied.and_then(|a| a.get(&p.partner_guid)).is_some_and(|n| *n >= x.seq)),
-                        look: look_of(&p.partner_guid),
+                        applied: last.is_some_and(|x| applied.and_then(|a| a.get(&partner.partner_guid)).is_some_and(|n| *n >= x.seq)),
+                        look: look_of(&partner.partner_guid),
                     }
                 })
                 .collect();
@@ -475,19 +486,19 @@ fn build_status(st: &AppState) -> Status
                 .filter(|c| c.guid == guid)
                 .flat_map(|c| &c.partners)
                 .filter(|p| !p.removed && !live.contains(&p.guid.as_str()))
-                .map(|p| Unpaired
+                .map(|partner| Unpaired
                 {
-                    guid: p.guid.clone(),
-                    name: p.name.clone(),
-                    offered: sess.state.offers.get(&guid).is_some_and(|m| m.contains_key(&p.guid)),
-                    app: match p.app
+                    guid: partner.guid.clone(),
+                    name: partner.name.clone(),
+                    offered: sess.state.offers.get(&guid).is_some_and(|m| m.contains_key(&partner.guid)),
+                    app: match partner.app
                     {
                         PartnerApp::Has(_) => "yes",
                         PartnerApp::No => "no",
                         PartnerApp::Unknown => "unknown",
                     },
 
-                    look: p.look.clone(),
+                    look: partner.look.clone(),
                 })
                 .collect();
 
@@ -512,55 +523,56 @@ fn build_status(st: &AppState) -> Status
     Status
     {
         version: VERSION,
-        setup_needed: inner.session.is_none() || !s.joined,
-        joined: s.joined,
+        setup_needed: inner.session.is_none() || !settings.joined,
+        joined: settings.joined,
         rejoin: inner.rejoin,
         game,
         game_path,
         online: inner.online,
-        pc_label: s.pc_label.clone(),
+        pc_label: settings.pc_label.clone(),
         game_running: inner.game_running,
-        auto_sync: s.auto_sync,
-        auto_update_sterling: s.auto_update_sterling,
+        auto_sync: settings.auto_sync,
+        auto_update_sterling: settings.auto_update_sterling,
         companion_installed,
         sterling_version,
         sterling_latest: inner.sterling_latest.clone(),
         app_latest: inner.app_latest.clone(),
         app_update: inner.app_update.clone(),
-        auto_update_app: s.auto_update_app,
-        close_to_tray: s.close_to_tray,
-        restart_game: s.restart_game,
-        start_with_windows: s.start_with_windows,
-        autostart_note: s.autostart_note.clone(),
-        notify_favs: s.notify_favs,
-        close_note_seen: s.close_note_seen,
-        helper_off: s.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
-        whats_new: whats_new(s.seen_version.as_deref()),
-        notices: notices::for_app(&inner.notices, VERSION, &s.dismissed_notices, now()),
+        auto_update_app: settings.auto_update_app,
+        close_to_tray: settings.close_to_tray,
+        restart_game: settings.restart_game,
+        start_with_windows: settings.start_with_windows,
+        autostart_note: settings.autostart_note.clone(),
+        notify_favs: settings.notify_favs,
+        close_note_seen: settings.close_note_seen,
+        helper_off: settings.game.as_deref().map(companion::helper_not_loaded).unwrap_or(false),
+        whats_new: whats_new(settings.seen_version.as_deref()),
+        notices: notices::for_app(&inner.notices, VERSION, &settings.dismissed_notices, now()),
         update_failed: inner.update_failed.clone(),
-        sterling_managed_by: if s.sterling_by_app { Vec::new() } else { inner.managers.clone() },
+        sterling_managed_by: if settings.sterling_by_app { Vec::new() } else { inner.managers.clone() },
         last_sync,
         last_error: inner.last_error.clone(),
         busy: inner.busy,
         updating: inner.updating.clone(),
-        character: s.character.clone(),
+        character: settings.character.clone(),
         characters,
         activity: inner.activity.iter().take(60).cloned().collect(),
     }
 }
 
+/// Sends the window a fresh status.
 fn emit_status(app: &AppHandle)
 {
-    let st = app.state::<AppState>();
-    let _ = app.emit("status", build_status(&st));
+    let state = app.state::<AppState>();
+    let _ = app.emit("status", build_status(&state));
 }
 
 // ------------------------------------------------------------------ commands: setup
 
 #[tauri::command]
-fn status(st: State<'_, AppState>) -> Status
+fn status(state: State<'_, AppState>) -> Status
 {
-    build_status(&st)
+    build_status(&state)
 }
 
 #[tauri::command(async)]
@@ -569,18 +581,19 @@ fn discover_games() -> Vec<GameFolder>
     paths::discover()
 }
 
-fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder, String>
+/// Switches to a new game folder and starts watching its saves.
+fn set_game(app: &AppHandle, state: &AppState, path: PathBuf) -> Result<GameFolder, String>
 {
-    let g = paths::normalise_pick(&path).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
-    let info = paths::inspect(&g).ok_or("That folder doesn't look like a WoW game folder.")?;
-    let sess = open_session(&g)?;
+    let picked_game = paths::normalise_pick(&path).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
+    let info = paths::inspect(&picked_game).ok_or("That folder doesn't look like a WoW game folder.")?;
+    let sess = open_session(&picked_game)?;
     let fresh = !companion::is_installed(&sess.fs);
 
     companion::install(&sess.fs, COMPANION_FILES).map_err(msg)?;
 
-    let running = GameCheck::default().running(&g);
+    let running = GameCheck::default().running(&picked_game);
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
 
         inner.game_running = running;
 
@@ -589,7 +602,7 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
             inner.settings.restart_game = true;
         }
 
-        inner.settings.game = Some(g);
+        inner.settings.game = Some(picked_game);
         save_json("settings.json", &inner.settings)?;
         inner.session = Some(sess);
 
@@ -606,7 +619,7 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
         inner.log(format!("Using your {game} folder. Added the Companion add-on (Sterling Quest Sync Companion)."), "");
     }
 
-    if let Some(tx) = st.rewatch.lock().unwrap().as_ref()
+    if let Some(tx) = state.rewatch.lock().unwrap().as_ref()
     {
         let _ = tx.send(());
     }
@@ -617,49 +630,49 @@ fn set_game(app: &AppHandle, st: &AppState, path: PathBuf) -> Result<GameFolder,
 
 /// Uses one of the folders `discover_games` found, by its position in that list.
 #[tauri::command(async)]
-fn use_found_game(app: AppHandle, st: State<'_, AppState>, index: usize) -> Result<GameFolder, String>
+fn use_found_game(app: AppHandle, state: State<'_, AppState>, index: usize) -> Result<GameFolder, String>
 {
     let found = paths::discover();
-    let g = found.get(index).ok_or("That folder isn't in the list any more.")?;
+    let game = found.get(index).ok_or("That folder isn't in the list any more.")?;
 
-    set_game(&app, &st, g.path.clone())
+    set_game(&app, &state, game.path.clone())
 }
 
 /// Setup step 1: show a found folder without using it yet.
 #[tauri::command(async)]
-fn candidate_found(st: State<'_, AppState>, index: usize) -> Result<GameFolder, String>
+fn candidate_found(state: State<'_, AppState>, index: usize) -> Result<GameFolder, String>
 {
     let found = paths::discover();
-    let g = found.get(index).ok_or("That folder isn't in the list any more.")?;
+    let game = found.get(index).ok_or("That folder isn't in the list any more.")?;
 
-    st.inner.lock().unwrap().candidate = Some(g.path.clone());
-    Ok(g.clone())
+    state.inner.lock().unwrap().candidate = Some(game.path.clone());
+    Ok(game.clone())
 }
 
 /// Setup step 1: "Change..." opens a folder picker; the folder is shown, not used yet.
 #[tauri::command(async)]
-fn candidate_pick(app: AppHandle, st: State<'_, AppState>) -> Result<Option<GameFolder>, String>
+fn candidate_pick(app: AppHandle, state: State<'_, AppState>) -> Result<Option<GameFolder>, String>
 {
     let Some(picked) = app.dialog().file().set_title("Pick your WoW game folder (the one with Interface and WTF)").blocking_pick_folder() else
     {
         return Ok(None);
     };
 
-    let p = picked.into_path().map_err(|e| e.to_string())?;
-    let g = paths::normalise_pick(&p).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
-    let info = paths::inspect(&g).ok_or("That folder doesn't look like a WoW game folder.")?;
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let picked_game = paths::normalise_pick(&path).ok_or("That folder doesn't look like a WoW game folder. Pick the one with Interface and WTF in it.")?;
+    let info = paths::inspect(&picked_game).ok_or("That folder doesn't look like a WoW game folder.")?;
 
-    st.inner.lock().unwrap().candidate = Some(g);
+    state.inner.lock().unwrap().candidate = Some(picked_game);
     Ok(Some(info))
 }
 
 /// Setup step 1 Continue: use the shown folder, and install Sterling there if asked.
 #[tauri::command(async)]
-fn confirm_game(app: AppHandle, st: State<'_, AppState>, install_sterling: bool) -> Result<(), String>
+fn confirm_game(app: AppHandle, state: State<'_, AppState>, install_sterling: bool) -> Result<(), String>
 {
-    let c = st.inner.lock().unwrap().candidate.clone().ok_or("Pick a game folder first.")?;
+    let candidate = state.inner.lock().unwrap().candidate.clone().ok_or("Pick a game folder first.")?;
 
-    set_game(&app, &st, c)?;
+    set_game(&app, &state, candidate)?;
 
     if install_sterling
     {
@@ -672,16 +685,16 @@ fn confirm_game(app: AppHandle, st: State<'_, AppState>, install_sterling: bool)
 
 /// Opens a folder picker on the Rust side; the page never sends a path.
 #[tauri::command(async)]
-fn pick_game_folder(app: AppHandle, st: State<'_, AppState>) -> Result<Option<GameFolder>, String>
+fn pick_game_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Option<GameFolder>, String>
 {
     let Some(picked) = app.dialog().file().set_title("Pick your WoW game folder (the one with Interface and WTF)").blocking_pick_folder() else
     {
         return Ok(None);
     };
 
-    let p = picked.into_path().map_err(|e| e.to_string())?;
+    let path = picked.into_path().map_err(|e| e.to_string())?;
 
-    set_game(&app, &st, p).map(Some)
+    set_game(&app, &state, path).map(Some)
 }
 
 #[derive(Serialize)]
@@ -690,11 +703,12 @@ struct Joined
     recovery_code: Option<String>,
 }
 
-fn finish_join(app: &AppHandle, st: &AppState, server: &str, key: &str, label: &str, recovery: Option<String>, how: &str) -> Result<Joined, String>
+/// Saves the key and settings after this PC joins an account, then syncs.
+fn finish_join(app: &AppHandle, app_state: &AppState, server: &str, key: &str, label: &str, recovery: Option<String>, how: &str) -> Result<Joined, String>
 {
-    st.keys.set(server, key).map_err(msg)?;
+    app_state.keys.set(server, key).map_err(msg)?;
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = app_state.inner.lock().unwrap();
 
         inner.settings.joined = true;
         inner.settings.pc_label = label.to_string();
@@ -716,86 +730,87 @@ fn finish_join(app: &AppHandle, st: &AppState, server: &str, key: &str, label: &
 
     emit_status(app);
 
-    let h = app.clone();
+    let handle = app.clone();
 
     std::thread::spawn(move ||
     {
-        let _ = run_sync(&h);
+        let _ = run_sync(&handle);
     });
 
     Ok(Joined { recovery_code: recovery })
 }
 
-fn server_of(st: &AppState) -> String
+/// The server address from settings.
+fn server_of(state: &AppState) -> String
 {
-    st.inner.lock().unwrap().settings.server.clone()
+    state.inner.lock().unwrap().settings.server.clone()
 }
 
 /// "Yes, this is my first PC", and "Start fresh" on the rejoin screen.
 #[tauri::command(async)]
-fn create_account(app: AppHandle, st: State<'_, AppState>, label: String, invite: Option<String>) -> Result<Joined, String>
+fn create_account(app: AppHandle, state: State<'_, AppState>, label: String, invite: Option<String>) -> Result<Joined, String>
 {
     let label = clean_label(&label).ok_or("Give this PC a name.")?;
-    let server = server_of(&st);
+    let server = server_of(&state);
     let key = api::new_key();
-    let c = Client::new(&server, &key).map_err(msg)?;
-    let j = c.join(&label, invite.as_deref().filter(|s| !s.trim().is_empty())).map_err(msg)?;
+    let client = Client::new(&server, &key).map_err(msg)?;
+    let joined = client.join(&label, invite.as_deref().filter(|s| !s.trim().is_empty())).map_err(msg)?;
 
-    finish_join(&app, &st, &server, &key, &label, j.recovery_code, "Made your sync account.")
+    finish_join(&app, &state, &server, &key, &label, joined.recovery_code, "Made your sync account.")
 }
 
 /// "No, I already use it on another PC".
 #[tauri::command(async)]
-fn link_this_pc(app: AppHandle, st: State<'_, AppState>, code: String, label: String) -> Result<Joined, String>
+fn link_this_pc(app: AppHandle, state: State<'_, AppState>, code: String, label: String) -> Result<Joined, String>
 {
     let label = clean_label(&label).ok_or("Give this PC a name.")?;
-    let server = server_of(&st);
+    let server = server_of(&state);
     let key = api::new_key();
 
     Client::new(&server, &key).map_err(msg)?.redeem_link(&code, &label).map_err(msg)?;
-    finish_join(&app, &st, &server, &key, &label, None, "Linked this PC to your account.")
+    finish_join(&app, &state, &server, &key, &label, None, "Linked this PC to your account.")
 }
 
 #[tauri::command(async)]
-fn recover_account(app: AppHandle, st: State<'_, AppState>, code: String, label: String) -> Result<Joined, String>
+fn recover_account(app: AppHandle, state: State<'_, AppState>, code: String, label: String) -> Result<Joined, String>
 {
     let label = clean_label(&label).ok_or("Give this PC a name.")?;
-    let server = server_of(&st);
+    let server = server_of(&state);
     let key = api::new_key();
-    let j = Client::new(&server, &key).map_err(msg)?.recover(&code, &label).map_err(msg)?;
+    let joined = Client::new(&server, &key).map_err(msg)?.recover(&code, &label).map_err(msg)?;
 
-    finish_join(&app, &st, &server, &key, &label, j.recovery_code, "Got your account back with the recovery code.")
+    finish_join(&app, &state, &server, &key, &label, joined.recovery_code, "Got your account back with the recovery code.")
 }
 
 /// Saves the recovery code as a .txt where the person picks, never inside the game folder.
 #[tauri::command(async)]
-fn save_recovery_txt(app: AppHandle, st: State<'_, AppState>, code: String) -> Result<bool, String>
+fn save_recovery_txt(app: AppHandle, state: State<'_, AppState>, code: String) -> Result<bool, String>
 {
-    let c = code.trim().to_uppercase();
-    let ok = c.starts_with("SQS-") && c.len() <= 40 && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-');
+    let typed = code.trim().to_uppercase();
+    let ok = typed.starts_with("SQS-") && typed.len() <= 40 && typed.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-');
 
     if !ok
     {
         return Err("That isn't a recovery code.".into());
     }
 
-    let Some(p) = app.dialog().file().set_file_name("sterling-quest-sync-recovery.txt").add_filter("Text", &["txt"]).blocking_save_file() else
+    let Some(path) = app.dialog().file().set_file_name("sterling-quest-sync-recovery.txt").add_filter("Text", &["txt"]).blocking_save_file() else
     {
         return Ok(false);
     };
 
-    let p = p.into_path().map_err(|e| e.to_string())?;
+    let path = path.into_path().map_err(|e| e.to_string())?;
     let text = format!
     (
-        "Sterling Quest Sync Companion recovery code\r\n\r\n{c}\r\n\r\nUse it when setting up the app again if no PC is left signed in.\r\nKeep it private: it lets someone use your sync account.\r\n"
+        "Sterling Quest Sync Companion recovery code\r\n\r\n{typed}\r\n\r\nUse it when setting up the app again if no PC is left signed in.\r\nKeep it private: it lets someone use your sync account.\r\n"
     );
 
-    let inner = st.inner.lock().unwrap();
+    let inner = state.inner.lock().unwrap();
 
     match &inner.session
     {
-        Some(sess) => sess.fs.write_user_export(&p, text.as_bytes()).map_err(msg)?,
-        None => fs::write(&p, text).map_err(|e| e.to_string())?,
+        Some(sess) => sess.fs.write_user_export(&path, text.as_bytes()).map_err(msg)?,
+        None => fs::write(&path, text).map_err(|e| e.to_string())?,
     }
 
     Ok(true)
@@ -803,60 +818,61 @@ fn save_recovery_txt(app: AppHandle, st: State<'_, AppState>, code: String) -> R
 
 // ------------------------------------------------------------------ sync
 
-fn describe(inner: &mut Inner, r: &Report)
+/// Turns a sync report into the activity lines the window shows.
+fn describe(inner: &mut Inner, report: &Report)
 {
     let names = inner.names();
     let name = |g: &String| names.get(g).cloned().unwrap_or_else(|| "a character".into());
-    let mut ups: Vec<String> = r.sent_to.iter().map(|(f, _)| name(f)).collect();
+    let mut ups: Vec<String> = report.sent_to.iter().map(|(f, _)| name(f)).collect();
 
     ups.dedup();
 
-    for u in ups
+    for uploaded in ups
     {
-        inner.log(format!("Shared {u}'s progress with your partners"), "good");
+        inner.log(format!("Shared {uploaded}'s progress with your partners"), "good");
     }
 
-    for (f, t) in &r.received_from
+    for (from_guid, to_guid) in &report.received_from
     {
-        if f == t
+        if from_guid == to_guid
         {
-            inner.log(format!("Got {}'s copy from your other PC", name(f)), "good");
+            inner.log(format!("Got {}'s copy from your other PC", name(from_guid)), "good");
         }
 
         else
         {
-            inner.log(format!("Got {}'s latest copy for {}", name(f), name(t)), "good");
+            inner.log(format!("Got {}'s latest copy for {}", name(from_guid), name(to_guid)), "good");
         }
     }
 
-    for (f, t) in &r.stale
+    for (from_guid, to_guid) in &report.stale
     {
-        inner.log(format!("Skipped an older save of {} for {}: the server already has a newer one", name(f), name(t)), "");
+        inner.log(format!("Skipped an older save of {} for {}: the server already has a newer one", name(from_guid), name(to_guid)), "");
     }
 
-    for (_, _, who) in &r.auto_paired
+    for (_, _, who) in &report.auto_paired
     {
         inner.log(format!("Paired with {who} automatically"), "good");
     }
 
-    for n in &r.auto_notes
+    for note in &report.auto_notes
     {
-        inner.log(n.clone(), "");
+        inner.log(note.clone(), "");
     }
 
-    for id in &r.ended
+    for id in &report.ended
     {
         let who = inner.session.as_ref().and_then(|s| s.state.pairs.iter().find(|p| &p.id == id)).map(|p| p.partner_name.clone()).unwrap_or_default();
 
         inner.log(format!("Stopped syncing with {} (removed in game)", if who.is_empty() { "a partner".into() } else { who }), "");
     }
 
-    if !r.skipped.is_empty()
+    if !report.skipped.is_empty()
     {
-        inner.log(format!("Skipped {} item(s) that didn't pass checks", r.skipped.len()), "bad");
+        inner.log(format!("Skipped {} item(s) that didn't pass checks", report.skipped.len()), "bad");
     }
 
-    if r.inbox_written && (!r.received_from.is_empty() || !r.ended.is_empty() || r.auto_offered > 0)
+    if report.inbox_written && (!report.received_from.is_empty() || !report.ended.is_empty() || report.auto_offered > 0)
     {
         let how = if inner.game_running { "Type /reload in game to see it." } else { "You'll see it next time you log in." };
 
@@ -866,12 +882,13 @@ fn describe(inner: &mut Inner, r: &Report)
 
 const OFFLINE_GRACE_SECS: i64 = 180;
 
+/// One full sync: read outboxes, talk to the server, write the inbox.
 fn run_sync(app: &AppHandle) -> Result<Report, String>
 {
-    let st = app.state::<AppState>();
+    let state = app.state::<AppState>();
     let settings =
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
 
         if inner.busy
         {
@@ -888,35 +905,35 @@ fn run_sync(app: &AppHandle) -> Result<Report, String>
 
     let res = (||
     {
-        let client = st.client(&settings).map_err(Error::Other)?;
-        let mut inner = st.inner.lock().unwrap();
+        let client = state.client(&settings).map_err(Error::Other)?;
+        let mut inner = state.inner.lock().unwrap();
         // Versions the add-on shows after a /reload.
         let app_info = AppInfo { version: VERSION.into(), latest: inner.app_latest.clone(), sterling_latest: inner.sterling_latest.clone() };
         let sess = inner.session.as_mut().ok_or_else(|| Error::Other("Pick your game folder first.".into()))?;
         let (outboxes, problems) = read_outboxes(&sess.fs);
-        let mut r = engine::sync(&client, &sess.fs, &mut sess.state, &outboxes, Some(app_info), now());
+        let mut report = engine::sync(&client, &sess.fs, &mut sess.state, &outboxes, Some(app_info), now());
 
-        if let Ok(rep) = r.as_mut()
+        if let Ok(rep) = report.as_mut()
         {
             rep.skipped.extend(problems);
         }
 
-        r
+        report
     })();
 
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
 
         inner.busy = false;
 
         match &res
         {
-            Ok(r) =>
+            Ok(report) =>
             {
                 inner.last_error = None;
                 inner.online = Some(true);
                 inner.offline_since = None;
-                describe(&mut inner, r);
+                describe(&mut inner, report);
             }
 
             Err(Error::Offline) =>
@@ -944,22 +961,22 @@ fn run_sync(app: &AppHandle) -> Result<Report, String>
                 inner.last_error = None;
             }
 
-            Err(e) =>
+            Err(error) =>
             {
                 inner.online = Some(true);
                 inner.offline_since = None;
 
-                let m = e.to_string();
+                let message = error.to_string();
 
-                inner.log(format!("Sync failed: {m}"), "bad");
-                inner.last_error = Some(m);
+                inner.log(format!("Sync failed: {message}"), "bad");
+                inner.last_error = Some(message);
             }
         }
     }
 
-    if let Ok(r) = &res
+    if let Ok(report) = &res
     {
-        notify_favourites(app, r);
+        notify_favourites(app, report);
     }
 
     emit_status(app);
@@ -976,7 +993,7 @@ fn sync_now(app: AppHandle) -> Result<Report, String>
 fn set_options
 (
     app: AppHandle,
-    st: State<'_, AppState>,
+    state: State<'_, AppState>,
     auto_sync: Option<bool>,
     auto_update_sterling: Option<bool>,
     auto_update_app: Option<bool>,
@@ -987,53 +1004,53 @@ fn set_options
     close_note_seen: Option<bool>,
 ) -> Result<(), String>
 {
-    if let Some(v) = start_with_windows
+    if let Some(value) = start_with_windows
     {
-        set_autostart(v)?;
+        set_autostart(value)?;
     }
 
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
 
-        if let Some(v) = start_with_windows
+        if let Some(value) = start_with_windows
         {
-            inner.settings.start_with_windows = v;
+            inner.settings.start_with_windows = value;
             inner.settings.autostart_note = None;
         }
 
-        if let Some(v) = notify_favs
+        if let Some(value) = notify_favs
         {
-            inner.settings.notify_favs = v;
+            inner.settings.notify_favs = value;
         }
 
-        if let Some(v) = close_note_seen
+        if let Some(version) = close_note_seen
         {
-            inner.settings.close_note_seen = v;
+            inner.settings.close_note_seen = version;
         }
 
-        if let Some(v) = auto_sync
+        if let Some(value) = auto_sync
         {
-            inner.settings.auto_sync = v;
+            inner.settings.auto_sync = value;
         }
 
-        if let Some(v) = auto_update_sterling
+        if let Some(value) = auto_update_sterling
         {
-            inner.settings.auto_update_sterling = v;
+            inner.settings.auto_update_sterling = value;
         }
 
-        if let Some(v) = close_to_tray
+        if let Some(value) = close_to_tray
         {
-            inner.settings.close_to_tray = v;
+            inner.settings.close_to_tray = value;
         }
 
-        if let Some(v) = auto_update_app
+        if let Some(value) = auto_update_app
         {
-            inner.settings.auto_update_app = v;
+            inner.settings.auto_update_app = value;
         }
 
-        if let Some(c) = character.filter(|c| sqs_core::formats::valid_guid(c))
+        if let Some(guid) = character.filter(|c| sqs_core::formats::valid_guid(c))
         {
-            inner.settings.character = Some(c);
+            inner.settings.character = Some(guid);
         }
 
         save_json("settings.json", &inner.settings)?;
@@ -1045,11 +1062,11 @@ fn set_options
 
 /// Star or unstar a partner of the selected character. Ok(false) means 5 are already starred.
 #[tauri::command]
-fn set_favorite(app: AppHandle, st: State<'_, AppState>, partner: String, on: bool) -> Result<bool, String>
+fn set_favorite(app: AppHandle, state: State<'_, AppState>, partner: String, on: bool) -> Result<bool, String>
 {
     let ok =
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
         let me = inner.settings.character.clone().ok_or("Select a character first.")?;
         let sess = inner.session.as_mut().ok_or("Pick your game folder first.")?;
 
@@ -1062,25 +1079,26 @@ fn set_favorite(app: AppHandle, st: State<'_, AppState>, partner: String, on: bo
 
 // ------------------------------------------------------------------ commands: pairing and account
 
-fn with_client<T>(st: &AppState, f: impl FnOnce(&Client) -> sqs_core::Result<T>) -> Result<T, String>
+/// Runs one server call with this PC's client, as window-ready errors.
+fn with_client<T>(state: &AppState, work: impl FnOnce(&Client) -> sqs_core::Result<T>) -> Result<T, String>
 {
-    let settings = st.inner.lock().unwrap().settings.clone();
-    let c = st.client(&settings)?;
+    let settings = state.inner.lock().unwrap().settings.clone();
+    let client = state.client(&settings)?;
 
-    f(&c).map_err(msg)
+    work(&client).map_err(msg)
 }
 
 /// The server lists only characters it has seen from the game. Pairing needs one.
-fn ensure_listed(st: &AppState, guid: &str) -> Result<(), String>
+fn ensure_listed(state: &AppState, guid: &str) -> Result<(), String>
 {
-    let ch =
+    let found =
     {
-        let inner = st.inner.lock().unwrap();
+        let inner = state.inner.lock().unwrap();
 
         inner.session.as_ref().and_then(|s| s.state.listed.get(guid).cloned())
     };
 
-    match ch
+    match found
     {
         Some(_) => Ok(()),
         None => Err("Log in on that character once with Sterling Quest Sync and Sterling Quest Sync Companion enabled, then try again.".into()),
@@ -1088,57 +1106,57 @@ fn ensure_listed(st: &AppState, guid: &str) -> Result<(), String>
 }
 
 #[tauri::command(async)]
-fn make_pair_code(st: State<'_, AppState>, guid: String) -> Result<api::Code, String>
+fn make_pair_code(state: State<'_, AppState>, guid: String) -> Result<api::Code, String>
 {
-    ensure_listed(&st, &guid)?;
-    with_client(&st, |c| c.pair_code(&guid))
+    ensure_listed(&state, &guid)?;
+    with_client(&state, |c| c.pair_code(&guid))
 }
 
 #[tauri::command(async)]
-fn open_codes(st: State<'_, AppState>) -> Result<Vec<api::OpenCode>, String>
+fn open_codes(state: State<'_, AppState>) -> Result<Vec<api::OpenCode>, String>
 {
-    with_client(&st, |c| c.open_codes())
+    with_client(&state, |c| c.open_codes())
 }
 
 #[tauri::command(async)]
-fn cancel_code(st: State<'_, AppState>, id: String) -> Result<(), String>
+fn cancel_code(state: State<'_, AppState>, id: String) -> Result<(), String>
 {
-    with_client(&st, |c| c.cancel_code(&id))
+    with_client(&state, |c| c.cancel_code(&id))
 }
 
 #[tauri::command(async)]
-fn peek_code(st: State<'_, AppState>, guid: String, code: String) -> Result<api::Peek, String>
+fn peek_code(state: State<'_, AppState>, guid: String, code: String) -> Result<api::Peek, String>
 {
-    ensure_listed(&st, &guid)?;
-    with_client(&st, |c| c.peek_code(&guid, &code))
+    ensure_listed(&state, &guid)?;
+    with_client(&state, |c| c.peek_code(&guid, &code))
 }
 
 #[tauri::command(async)]
-fn redeem_code(app: AppHandle, st: State<'_, AppState>, guid: String, code: String, replace: bool) -> Result<api::Redeemed, String>
+fn redeem_code(app: AppHandle, state: State<'_, AppState>, guid: String, code: String, replace: bool) -> Result<api::Redeemed, String>
 {
-    let peek = with_client(&st, |c| c.peek_code(&guid, &code))?;
-    let r = with_client(&st, |c| c.redeem_code(&guid, &code, replace))?;
+    let peek = with_client(&state, |c| c.peek_code(&guid, &code))?;
+    let redeemed = with_client(&state, |c| c.redeem_code(&guid, &code, replace))?;
 
-    st.inner.lock().unwrap().log(format!("Paired with {}", peek.partner.name), "good");
+    state.inner.lock().unwrap().log(format!("Paired with {}", peek.partner.name), "good");
 
     let _ = run_sync(&app);
 
-    Ok(r)
+    Ok(redeemed)
 }
 
 #[tauri::command(async)]
-fn end_pairing(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String>
+fn end_pairing(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String>
 {
-    with_client(&st, |c| c.end_pairing(&id))?;
+    with_client(&state, |c| c.end_pairing(&id))?;
 
     let who =
     {
-        let inner = st.inner.lock().unwrap();
+        let inner = state.inner.lock().unwrap();
 
         inner.session.as_ref().and_then(|s| s.state.pairs.iter().find(|p| p.id == id)).map(|p| p.partner_name.clone()).unwrap_or_default()
     };
 
-    st.inner.lock().unwrap().log(format!("Stopped syncing with {who}"), "");
+    state.inner.lock().unwrap().log(format!("Stopped syncing with {who}"), "");
 
     let _ = run_sync(&app);
 
@@ -1146,44 +1164,44 @@ fn end_pairing(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<()
 }
 
 #[tauri::command(async)]
-fn account(st: State<'_, AppState>) -> Result<api::AccountInfo, String>
+fn account(state: State<'_, AppState>) -> Result<api::AccountInfo, String>
 {
-    with_client(&st, |c| c.account())
+    with_client(&state, |c| c.account())
 }
 
 #[tauri::command(async)]
-fn link_code(st: State<'_, AppState>) -> Result<api::Code, String>
+fn link_code(state: State<'_, AppState>) -> Result<api::Code, String>
 {
-    with_client(&st, |c| c.link_code())
+    with_client(&state, |c| c.link_code())
 }
 
 #[tauri::command(async)]
-fn new_recovery_code(st: State<'_, AppState>) -> Result<String, String>
+fn new_recovery_code(state: State<'_, AppState>) -> Result<String, String>
 {
-    let c = with_client(&st, |c| c.new_recovery())?;
+    let new_code = with_client(&state, |new_code| new_code.new_recovery())?;
 
-    st.inner.lock().unwrap().log("Made a new recovery code. The old one no longer works.", "");
-    Ok(c)
+    state.inner.lock().unwrap().log("Made a new recovery code. The old one no longer works.", "");
+    Ok(new_code)
 }
 
 #[tauri::command(async)]
-fn remove_pc(st: State<'_, AppState>, id: String) -> Result<(), String>
+fn remove_pc(state: State<'_, AppState>, id: String) -> Result<(), String>
 {
-    with_client(&st, |c| c.remove_pc(&id))?;
-    st.inner.lock().unwrap().log("Removed a PC from your account.", "");
+    with_client(&state, |c| c.remove_pc(&id))?;
+    state.inner.lock().unwrap().log("Removed a PC from your account.", "");
     Ok(())
 }
 
 /// "Delete my data". The confirm step lives in the page; the server does the rest.
 #[tauri::command(async)]
-fn delete_my_data(app: AppHandle, st: State<'_, AppState>) -> Result<(), String>
+fn delete_my_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), String>
 {
-    with_client(&st, |c| c.delete_account())?;
+    with_client(&state, |c| c.delete_account())?;
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
         let server = inner.settings.server.clone();
 
-        st.keys.delete(&server).map_err(msg)?;
+        state.keys.delete(&server).map_err(msg)?;
         inner.settings.joined = false;
         save_json("settings.json", &inner.settings)?;
 
@@ -1202,36 +1220,39 @@ fn delete_my_data(app: AppHandle, st: State<'_, AppState>) -> Result<(), String>
 
 // ------------------------------------------------------------------ Sterling updates
 
+/// Checks for app and Sterling updates in the background, without bothering anyone.
 fn check_sterling_quiet(app: &AppHandle) -> Option<String>
 {
     let app_latest = updater::latest_tag(updater::APP_REPO);
-    let st = app.state::<AppState>();
+    let state = app.state::<AppState>();
 
     if app_latest.is_some()
     {
-        st.inner.lock().unwrap().app_latest = app_latest;
+        state.inner.lock().unwrap().app_latest = app_latest;
     }
 
     let rel = updater::latest_release().ok()?;
-    let mut inner = st.inner.lock().unwrap();
+    let mut inner = state.inner.lock().unwrap();
 
     inner.sterling_latest = Some(rel.version.clone());
     inner.sterling_checked = Some(Instant::now());
     Some(rel.version)
 }
 
+/// Installs Sterling Quest Sync now, for the window's button.
 fn install_sterling_now(app: &AppHandle) -> Result<String, String>
 {
     install_sterling(app)
 }
 
+/// Downloads the latest Sterling Quest Sync and installs it into the game folder.
 fn install_sterling(app: &AppHandle) -> Result<String, String>
 {
-    let st = app.state::<AppState>();
+    let state = app.state::<AppState>();
     let rel = updater::latest_release().map_err(msg)?;
     let bytes = updater::download(&rel).map_err(msg)?;
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
         let sess = inner.session.as_ref().ok_or("Pick your game folder first.")?;
         let fresh = updater::installed_version(sess.fs.game()).is_none();
 
@@ -1290,17 +1311,17 @@ fn check_notices(app: &AppHandle)
 {
     let server = app.state::<AppState>().inner.lock().unwrap().settings.server.clone();
 
-    if let Ok(m) = api::Client::meta(&server)
+    if let Ok(server_meta) = api::Client::meta(&server)
     {
-        app.state::<AppState>().inner.lock().unwrap().notices = m.notices;
+        app.state::<AppState>().inner.lock().unwrap().notices = server_meta.notices;
     }
 }
 
 #[tauri::command]
-fn dismiss_notice(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String>
+fn dismiss_notice(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String>
 {
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
         let list = &mut inner.settings.dismissed_notices;
 
         if !list.contains(&id)
@@ -1322,11 +1343,11 @@ fn dismiss_notice(app: AppHandle, st: State<'_, AppState>, id: String) -> Result
 
 /// The notice's button. The link is checked again here, right before it opens.
 #[tauri::command]
-fn open_notice(st: State<'_, AppState>, id: String) -> Result<(), String>
+fn open_notice(state: State<'_, AppState>, id: String) -> Result<(), String>
 {
     let link =
     {
-        let inner = st.inner.lock().unwrap();
+        let inner = state.inner.lock().unwrap();
 
         inner.notices.iter().find(|n| n.id == id).and_then(|n| n.link.clone())
     };
@@ -1340,22 +1361,22 @@ fn open_notice(st: State<'_, AppState>, id: String) -> Result<(), String>
 
 /// An error with everything that caused it ("error sending request: connection refused"),
 /// so a failed update says why instead of only which address it tried.
-fn full_error(e: &dyn std::error::Error) -> String
+fn full_error(top: &dyn std::error::Error) -> String
 {
-    let mut out = e.to_string();
-    let mut cur = e.source();
+    let mut out = top.to_string();
+    let mut cur = top.source();
 
-    while let Some(c) = cur
+    while let Some(cause) = cur
     {
-        let t = c.to_string();
+        let text = cause.to_string();
 
-        if !t.is_empty() && !out.contains(&t)
+        if !text.is_empty() && !out.contains(&text)
         {
             out.push_str(": ");
-            out.push_str(&t);
+            out.push_str(&text);
         }
 
-        cur = c.source();
+        cur = cause.source();
     }
 
     out
@@ -1366,16 +1387,16 @@ fn full_error(e: &dyn std::error::Error) -> String
 /// Asks the update feed, and once more a few seconds later if that fails, so a short network
 /// blip doesn't count as a failed update. The feed addresses are tried in order (tauri.conf.json):
 /// this project's own server first, then GitHub.
-async fn check_feed(u: &tauri_plugin_updater::Updater) -> Result<Option<tauri_plugin_updater::Update>, String>
+async fn check_feed(updater: &tauri_plugin_updater::Updater) -> Result<Option<tauri_plugin_updater::Update>, String>
 {
-    match u.check().await
+    match updater.check().await
     {
         Ok(found) => Ok(found),
         Err(_) =>
         {
             // Every caller runs this on its own thread (block_on), so a plain sleep holds up nothing else.
             std::thread::sleep(Duration::from_secs(3));
-            u.check().await.map_err(|e| full_error(&e))
+            updater.check().await.map_err(|e| full_error(&e))
         }
     }
 }
@@ -1385,14 +1406,14 @@ fn check_app_update(app: &AppHandle) -> Option<String>
 {
     let found = tauri::async_runtime::block_on(async
     {
-        let u = app.updater().ok()?;
+        let updater = app.updater().ok()?;
 
-        check_feed(&u).await.ok().flatten().map(|x| x.version)
+        check_feed(&updater).await.ok().flatten().map(|x| x.version)
     });
 
-    let st = app.state::<AppState>();
+    let state = app.state::<AppState>();
 
-    st.inner.lock().unwrap().app_update = found.clone();
+    state.inner.lock().unwrap().app_update = found.clone();
     found
 }
 
@@ -1407,8 +1428,8 @@ fn install_app_update(app: &AppHandle) -> Result<(), String>
     };
 
     {
-        let st = app.state::<AppState>();
-        let mut inner = st.inner.lock().unwrap();
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
 
         if inner.updating.is_some()
         {
@@ -1424,46 +1445,47 @@ fn install_app_update(app: &AppHandle) -> Result<(), String>
 
     let result = tauri::async_runtime::block_on(async
     {
-        let u = app.updater().map_err(|e| e.to_string())?;
+        let updater = app.updater().map_err(|e| e.to_string())?;
 
         set("Finding the update", None);
 
-        let up = check_feed(&u).await?.ok_or("You already have the newest version.")?;
+        let update_found = check_feed(&updater).await?.ok_or("You already have the newest version.")?;
         let mut got: u64 = 0;
         let mut shown: Option<u8> = None;
 
         set("Downloading", Some(0));
-        up.download_and_install
-        (
-            |chunk, total|
-            {
-                got += chunk as u64;
-
-                if let Some(t) = total.filter(|t| *t > 0)
+        update_found
+            .download_and_install
+            (
+                |chunk, total|
                 {
-                    let pct = ((got * 100) / t).min(100) as u8;
+                    got += chunk as u64;
 
-                    if shown != Some(pct)
+                    if let Some(total_bytes) = total.filter(|total_bytes| *total_bytes > 0)
                     {
-                        shown = Some(pct);
-                        set("Downloading", Some(pct));
-                    }
-                }
-            },
+                        let pct = ((got * 100) / total_bytes).min(100) as u8;
 
-            || set("Checking the signature and installing. The app reopens in a moment.", None),
-        )
-        .await
-        .map_err(|e| full_error(&e))?;
+                        if shown != Some(pct)
+                        {
+                            shown = Some(pct);
+                            set("Downloading", Some(pct));
+                        }
+                    }
+                },
+
+                || set("Checking the signature and installing. The app reopens in a moment.", None),
+            )
+            .await
+            .map_err(|e| full_error(&e))?;
         Ok::<(), String>(())
     });
 
-    if let Err(e) = result
+    if let Err(error) = result
     {
         app.state::<AppState>().inner.lock().unwrap().updating = None;
         emit_status(app);
 
-        return Err(e);
+        return Err(error);
     }
 
     app.restart();
@@ -1473,14 +1495,14 @@ fn install_app_update(app: &AppHandle) -> Result<(), String>
 #[tauri::command(async)]
 fn check_for_app_update(app: AppHandle) -> Result<Option<String>, String>
 {
-    let a = app.clone();
+    let handle = app.clone();
     let found = off_runtime(move ||
     {
         tauri::async_runtime::block_on(async
         {
-            let u = a.updater().map_err(|e| e.to_string())?;
+            let updater = handle.updater().map_err(|e| e.to_string())?;
 
-            check_feed(&u).await.map(|x| x.map(|x| x.version))
+            check_feed(&updater).await.map(|x| x.map(|x| x.version))
         })
     })
     .map_err(|e| format!("Couldn't check for updates: {e}"))?;
@@ -1491,29 +1513,29 @@ fn check_for_app_update(app: AppHandle) -> Result<Option<String>, String>
 
 /// Runs blocking update work on its own plain thread. Commands run inside the async runtime,
 /// where `block_on` can't be used (it panicked there, so the Update button did nothing).
-fn off_runtime<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String>
+fn off_runtime<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String>
 {
-    std::thread::spawn(f).join().unwrap_or_else(|_| Err("The update stopped unexpectedly. Details are in crash.log.".into()))
+    std::thread::spawn(work).join().unwrap_or_else(|_| Err("The update stopped unexpectedly. Details are in crash.log.".into()))
 }
 
 #[tauri::command(async)]
 fn update_app(app: AppHandle) -> Result<(), String>
 {
-    let a = app.clone();
+    let handle = app.clone();
 
-    off_runtime(move || install_app_update(&a)).map_err(|e|
+    off_runtime(move || install_app_update(&handle)).map_err(|error|
     {
         {
-            let st = app.state::<AppState>();
-            let mut inner = st.inner.lock().unwrap();
+            let state = app.state::<AppState>();
+            let mut inner = state.inner.lock().unwrap();
 
             inner.updating = None;
-            inner.update_failed = Some(e.clone());
-            inner.log(format!("App update failed: {e}"), "bad");
+            inner.update_failed = Some(error.clone());
+            inner.log(format!("App update failed: {error}"), "bad");
         }
 
         emit_status(&app);
-        e
+        error
     })
 }
 
@@ -1521,8 +1543,8 @@ fn update_app(app: AppHandle) -> Result<(), String>
 #[tauri::command]
 fn open_backups() -> Result<(), String>
 {
-    let p = app_data().join("backups");
-    let _ = fs::create_dir_all(&p);
+    let path = app_data().join("backups");
+    let _ = fs::create_dir_all(&path);
     #[cfg(windows)]
     let cmd = "explorer";
     #[cfg(target_os = "macos")]
@@ -1530,7 +1552,7 @@ fn open_backups() -> Result<(), String>
     #[cfg(all(unix, not(target_os = "macos")))]
     let cmd = "xdg-open";
 
-    std::process::Command::new(cmd).arg(p).spawn().map(|_| ()).map_err(|e| e.to_string())
+    std::process::Command::new(cmd).arg(path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Opens one of a few fixed web pages in the browser.
@@ -1558,25 +1580,25 @@ fn open_url(url: &str) -> Result<(), String>
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(url).spawn();
     #[cfg(all(unix, not(target_os = "macos")))]
-    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    let spawned = std::process::Command::new("xdg-open").arg(url).spawn();
 
-    r.map(|_| ()).map_err(|e| e.to_string())
+    spawned.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn hide_to_tray(app: AppHandle)
 {
-    if let Some(w) = app.get_webview_window("main")
+    if let Some(window) = app.get_webview_window("main")
     {
-        let _ = w.hide();
+        let _ = window.hide();
     }
 }
 
 /// The X button: hide to the tray, or quit, as set in Settings.
 #[tauri::command]
-fn close_window(app: AppHandle, st: State<'_, AppState>)
+fn close_window(app: AppHandle, state: State<'_, AppState>)
 {
-    if st.inner.lock().unwrap().settings.close_to_tray
+    if state.inner.lock().unwrap().settings.close_to_tray
     {
         hide_to_tray(app);
     }
@@ -1627,8 +1649,8 @@ fn background(app: AppHandle)
     {
         let dirs: Vec<(String, PathBuf)> =
         {
-            let st = app.state::<AppState>();
-            let inner = st.inner.lock().unwrap();
+            let state = app.state::<AppState>();
+            let inner = state.inner.lock().unwrap();
 
             match &inner.session
             {
@@ -1671,19 +1693,19 @@ fn background(app: AppHandle)
 
                 let (folder, auto_sterling, checked) =
                 {
-                    let st = app.state::<AppState>();
-                    let inner = st.inner.lock().unwrap();
+                    let state = app.state::<AppState>();
+                    let inner = state.inner.lock().unwrap();
                     (inner.session.as_ref().map(|s| s.fs.game().to_path_buf()), inner.settings.auto_update_sterling, inner.sterling_checked)
                 };
 
-                if let Some(f) = folder
+                if let Some(picked) = folder
                 {
-                    let running = game.running(&f);
+                    let running = game.running(&picked);
                     let found: Vec<String> = sqs_core::game::addon_managers(&mut game).into_iter().map(String::from).collect();
                     let managers_changed =
                     {
-                        let st = app.state::<AppState>();
-                        let mut inner = st.inner.lock().unwrap();
+                        let state = app.state::<AppState>();
+                        let mut inner = state.inner.lock().unwrap();
                         let changed = inner.managers != found;
 
                         inner.managers = found;
@@ -1697,8 +1719,8 @@ fn background(app: AppHandle)
 
                     let (was, cleared) =
                     {
-                        let st = app.state::<AppState>();
-                        let mut inner = st.inner.lock().unwrap();
+                        let state = app.state::<AppState>();
+                        let mut inner = state.inner.lock().unwrap();
                         // Game closed: its next start finds any newly added add-on.
                         let cleared = !running && inner.settings.restart_game;
 
@@ -1738,12 +1760,12 @@ fn background(app: AppHandle)
 
                         if let Some(latest) = check_sterling_quiet(&app)
                         {
-                            let installed = updater::installed_version(&f);
+                            let installed = updater::installed_version(&picked);
                             // Leave the add-on to WowUp or the CurseForge app when they look after it.
                             let ours =
                             {
-                                let st = app.state::<AppState>();
-                                let inner = st.inner.lock().unwrap();
+                                let state = app.state::<AppState>();
+                                let inner = state.inner.lock().unwrap();
 
                                 inner.settings.sterling_by_app || inner.managers.is_empty()
                             };
@@ -1762,12 +1784,13 @@ fn background(app: AppHandle)
     }
 }
 
+/// Syncs on its own when auto sync is on and everything is set up.
 fn maybe_sync(app: &AppHandle) -> Result<(), String>
 {
     let ready =
     {
-        let st = app.state::<AppState>();
-        let inner = st.inner.lock().unwrap();
+        let state = app.state::<AppState>();
+        let inner = state.inner.lock().unwrap();
 
         inner.settings.auto_sync && inner.settings.joined && inner.session.is_some() && !inner.rejoin
     };
@@ -1817,11 +1840,12 @@ const WHATS_NEW: &[(&str, &[&str])] = &
     ),
 ];
 
-fn newer_version(a: &str, b: &str) -> bool
+/// Is the left version newer than the right one?
+fn newer_version(left: &str, right: &str) -> bool
 {
-    let p = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
+    let parts = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
 
-    p(a) > p(b)
+    parts(left) > parts(right)
 }
 
 /// Notes for every version after the one last seen, up to this one. Nothing on a fresh install.
@@ -1872,9 +1896,9 @@ fn classify_autostart(run_present: bool, approved: Option<&[u8]>) -> Autostart
 }
 
 #[cfg(windows)]
-fn wide(s: &str) -> Vec<u16>
+fn wide(text: &str) -> Vec<u16>
 {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
+    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Reads one registry value under HKCU. None when it isn't there.
@@ -1883,19 +1907,21 @@ fn reg_read(key: &str, name: &str) -> Option<Vec<u8>>
 {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_ANY};
 
-    let (k, n) = (wide(key), wide(name));
+    let (wide_key, wide_name) = (wide(key), wide(name));
     let mut len: u32 = 0;
-    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), std::ptr::null_mut(), &mut len) };
+    let status =
+        unsafe { RegGetValueW(HKEY_CURRENT_USER, wide_key.as_ptr(), wide_name.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), std::ptr::null_mut(), &mut len) };
 
-    if r != 0
+    if status != 0
     {
         return None;
     }
 
     let mut buf = vec![0u8; len as usize];
-    let r = unsafe { RegGetValueW(HKEY_CURRENT_USER, k.as_ptr(), n.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
+    let status =
+        unsafe { RegGetValueW(HKEY_CURRENT_USER, wide_key.as_ptr(), wide_name.as_ptr(), RRF_RT_ANY, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut len) };
 
-    if r != 0
+    if status != 0
     {
         return None;
     }
@@ -1937,11 +1963,11 @@ fn set_autostart(on: bool) -> Result<(), String>
         {
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let cmd = wide(&format!("\"{}\" --hidden", exe.display()));
-            let r = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, cmd.as_ptr().cast(), (cmd.len() * 2) as u32) };
+            let status = unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, cmd.as_ptr().cast(), (cmd.len() * 2) as u32) };
 
-            if r != 0
+            if status != 0
             {
-                return Err(format!("Couldn't add the app to Windows startup (error {r})."));
+                return Err(format!("Couldn't add the app to Windows startup (error {status})."));
             }
 
             // The person just turned it on here, so a switch-off from Task Manager is lifted too
@@ -1956,12 +1982,12 @@ fn set_autostart(on: bool) -> Result<(), String>
 
         else
         {
-            let r = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) };
+            let status = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) };
 
             // 2 = not there, which is what we wanted anyway.
-            if r != 0 && r != 2
+            if status != 0 && status != 2
             {
-                return Err(format!("Couldn't remove the app from Windows startup (error {r})."));
+                return Err(format!("Couldn't remove the app from Windows startup (error {status})."));
             }
 
             unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, approved.as_ptr(), name.as_ptr()) };
@@ -1990,8 +2016,8 @@ fn check_autostart(app: &AppHandle)
 
     let changed =
     {
-        let st = app.state::<AppState>();
-        let mut inner = st.inner.lock().unwrap();
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
 
         if !inner.settings.start_with_windows
         {
@@ -2025,14 +2051,14 @@ fn check_autostart(app: &AppHandle)
 }
 
 /// A Windows notification for each favourite whose new progress just arrived, when turned on.
-fn notify_favourites(app: &AppHandle, r: &Report)
+fn notify_favourites(app: &AppHandle, report: &Report)
 {
     use tauri_plugin_notification::NotificationExt;
 
     let lines: Vec<String> =
     {
-        let st = app.state::<AppState>();
-        let inner = st.inner.lock().unwrap();
+        let state = app.state::<AppState>();
+        let inner = state.inner.lock().unwrap();
 
         if !inner.settings.notify_favs
         {
@@ -2042,7 +2068,8 @@ fn notify_favourites(app: &AppHandle, r: &Report)
         let Some(sess) = inner.session.as_ref() else { return };
         let names = inner.names();
 
-        r.received_from
+        report
+            .received_from
             .iter()
             .filter(|(from, to)| from != to && sess.state.favs.get(to).is_some_and(|f| f.list.contains(from)))
             .map(|(from, _)| names.get(from).cloned().unwrap_or_else(|| "A favourite".into()))
@@ -2064,98 +2091,98 @@ fn notify_favourites(app: &AppHandle, r: &Report)
 /// become "Character 1" and "Partner A", no realms, GUIDs, codes, keys, account or PC names, and
 /// the Windows user folder becomes %USERPROFILE%.
 #[tauri::command]
-fn support_details(st: State<'_, AppState>) -> String
+fn support_details(state: State<'_, AppState>) -> String
 {
-    let status = build_status(&st);
-    let inner = st.inner.lock().unwrap();
+    let status = build_status(&state);
+    let inner = state.inner.lock().unwrap();
     let ago = |t: Option<i64>| match t
     {
         None => "never".to_string(),
-        Some(t) =>
+        Some(time) =>
         {
-            let m = (now() - t).max(0) / 60;
+            let minutes = (now() - time).max(0) / 60;
 
-            if m < 1
+            if minutes < 1
             {
                 "just now".into()
             }
 
-            else if m < 120
+            else if minutes < 120
             {
-                format!("{m} min ago")
+                format!("{minutes} min ago")
             }
 
-            else if m < 48 * 60
+            else if minutes < 48 * 60
             {
-                format!("{} hrs ago", m / 60)
+                format!("{} hrs ago", minutes / 60)
             }
 
             else
             {
-                format!("{} days ago", m / 1440)
+                format!("{} days ago", minutes / 1440)
             }
         }
     };
 
-    let yn = |b: bool| if b { "yes" } else { "no" };
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
 
     // Every name the app knows, mapped to a placeholder. Longest first so "Bran Ashvale" goes before "Bran".
     let mut names: Vec<(String, String)> = Vec::new();
 
-    for (i, c) in status.characters.iter().enumerate()
+    for (i, character) in status.characters.iter().enumerate()
     {
-        names.push((c.name.clone(), format!("Character {}", i + 1)));
+        names.push((character.name.clone(), format!("Character {}", i + 1)));
 
-        if let Some(n) = c.look.nick.clone()
+        if let Some(nick) = character.look.nick.clone()
         {
-            names.push((n, format!("Character {}", i + 1)));
+            names.push((nick, format!("Character {}", i + 1)));
         }
     }
 
     let mut letter = 0u8;
-    let mut partner_label = |n: &str, names: &mut Vec<(String, String)>| -> String
+    let mut partner_label = |real_name: &str, names: &mut Vec<(String, String)>| -> String
     {
-        if let Some((_, l)) = names.iter().find(|(k, _)| k == n)
+        if let Some((_, existing)) = names.iter().find(|(k, _)| k == real_name)
         {
-            return l.clone();
+            return existing.clone();
         }
 
-        let l = format!("Partner {}", (b'A' + (letter % 26)) as char);
+        let made = format!("Partner {}", (b'A' + (letter % 26)) as char);
 
         letter += 1;
-        names.push((n.to_string(), l.clone()));
-        l
+        names.push((real_name.to_string(), made.clone()));
+        made
     };
 
-    for c in &status.characters
+    for character in &status.characters
     {
-        for p in &c.partners
+        for partner in &character.partners
         {
-            let l = partner_label(&p.name, &mut names);
+            let stand_in = partner_label(&partner.name, &mut names);
 
-            if let Some(n) = p.look.nick.clone()
+            if let Some(nick) = partner.look.nick.clone()
             {
-                names.push((n, l));
+                names.push((nick, stand_in));
             }
         }
 
-        for u in &c.unpaired
+        for waiting_partner in &character.unpaired
         {
-            if let Some(name) = u.name.as_deref().filter(|n| !n.is_empty())
+            if let Some(name) = waiting_partner.name.as_deref().filter(|n| !n.is_empty())
             {
-                let l = partner_label(name, &mut names);
+                let stand_in = partner_label(name, &mut names);
 
-                if let Some(n) = u.look.nick.clone()
+                if let Some(nick) = waiting_partner.look.nick.clone()
                 {
-                    names.push((n, l));
+                    names.push((nick, stand_in));
                 }
             }
         }
     }
 
-    for n in inner.names().values()
+    for known_name in inner.names().values()
     {
-        partner_label(n, &mut names);
+        partner_label(known_name, &mut names);
     }
 
     names.retain(|(k, _)| k.chars().count() >= 2);
@@ -2171,9 +2198,9 @@ fn support_details(st: State<'_, AppState>) -> String
     line("Companion app", VERSION.to_string());
     line("Windows", windows_version());
     line("Game folder type", status.game.as_ref().map(|g| g.flavour.clone()).unwrap_or_else(|| "not set".into()));
-    line("WoW running", yn(status.game_running).into());
-    line("Restart of WoW pending", yn(status.restart_game).into());
-    line("Companion add-on installed", yn(status.companion_installed).into());
+    line("WoW running", yes_no(status.game_running).into());
+    line("Restart of WoW pending", yes_no(status.restart_game).into());
+    line("Companion add-on installed", yes_no(status.companion_installed).into());
     line("Companion add-on loaded by WoW", if status.helper_off { "NO, the game saved without it".into() } else { "yes, or not known yet".into() });
     line
     (
@@ -2187,19 +2214,19 @@ fn support_details(st: State<'_, AppState>) -> String
     );
 
     line("Add-on managers on this PC", if inner.managers.is_empty() { "none seen".into() } else { inner.managers.join(", ") });
-    line("Add-on installed by the Companion", yn(inner.settings.sterling_by_app).into());
+    line("Add-on installed by the Companion", yes_no(inner.settings.sterling_by_app).into());
     line
     (
         "Settings",
         format!
         (
             "sync automatically {}, keep add-on updated {}, update app automatically {}, close to tray {}, start with Windows {}, favourite notifications {}",
-            yn(status.auto_sync),
-            yn(status.auto_update_sterling),
-            yn(status.auto_update_app),
-            yn(status.close_to_tray),
-            yn(status.start_with_windows),
-            yn(status.notify_favs)
+            yes_no(status.auto_sync),
+            yes_no(status.auto_update_sterling),
+            yes_no(status.auto_update_app),
+            yes_no(status.close_to_tray),
+            yes_no(status.start_with_windows),
+            yes_no(status.notify_favs)
         ),
     );
 
@@ -2214,31 +2241,31 @@ fn support_details(st: State<'_, AppState>) -> String
         },
     );
 
-    line("Custom server", yn(inner.settings.server != api::DEFAULT_SERVER).into());
+    line("Custom server", yes_no(inner.settings.server != api::DEFAULT_SERVER).into());
     line("Last sync", ago(status.last_sync));
     line("Last error", status.last_error.as_deref().map(|e| clean(e)).unwrap_or_else(|| "none".into()));
     line("Characters", status.characters.len().to_string());
 
-    for (i, c) in status.characters.iter().enumerate()
+    for (i, character) in status.characters.iter().enumerate()
     {
-        let active = c.partners.iter().filter(|p| p.active).count();
-        let waiting = c.partners.iter().filter(|p| p.active && p.last_copy.is_some() && !p.applied).count();
-        let no_copy = c.partners.iter().filter(|p| p.active && p.last_copy.is_none()).count();
-        let ended = c.partners.iter().filter(|p| !p.active).count();
-        let app_no = c.unpaired.iter().filter(|u| u.app == "no").count();
-        let app_yes = c.unpaired.len() - app_no;
+        let active = character.partners.iter().filter(|p| p.active).count();
+        let waiting = character.partners.iter().filter(|p| p.active && p.last_copy.is_some() && !p.applied).count();
+        let no_copy = character.partners.iter().filter(|p| p.active && p.last_copy.is_none()).count();
+        let ended = character.partners.iter().filter(|p| !p.active).count();
+        let app_no = character.unpaired.iter().filter(|u| u.app == "no").count();
+        let app_yes = character.unpaired.len() - app_no;
 
         out.push_str(&format!
         (
             "  Character {}: level {}, add-on {}, last save {}, waiting to sync {}, paired {} (new copy not loaded yet {}, no copy yet {}, ended {}), not paired yet {} (have the app or unknown {}, no app {}), favourites {}\n",
             i + 1,
-            c.look.level.map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
-            c.sterling.clone().unwrap_or_else(|| "?".into()),
-            ago(c.saved),
-            yn(c.ready),
+            character.look.level.map(|l| l.to_string()).unwrap_or_else(|| "?".into()),
+            character.sterling.clone().unwrap_or_else(|| "?".into()),
+            ago(character.saved),
+            yes_no(character.ready),
             active, waiting, no_copy, ended,
-            c.unpaired.len(), app_yes, app_no,
-            c.favs.len()
+            character.unpaired.len(), app_yes, app_no,
+            character.favs.len()
         ));
     }
 
@@ -2251,9 +2278,9 @@ fn support_details(st: State<'_, AppState>) -> String
         out.push_str("  none\n");
     }
 
-    for a in recent
+    for event in recent
     {
-        out.push_str(&format!("  {} {}\n", ago(Some(a.t)), clean(&a.text)));
+        out.push_str(&format!("  {} {}\n", ago(Some(event.t)), clean(&event.text)));
     }
 
     out.push_str("Crash log (newest first):\n");
@@ -2266,9 +2293,9 @@ fn support_details(st: State<'_, AppState>) -> String
         out.push_str("  none\n");
     }
 
-    for l in tail
+    for line in tail
     {
-        out.push_str(&format!("  {}\n", clean(l)));
+        out.push_str(&format!("  {}\n", clean(line)));
     }
 
     out.push_str("(Names are replaced with Character 1, Partner A and so on. No codes, keys, account details or realms are included.)\n");
@@ -2278,24 +2305,24 @@ fn support_details(st: State<'_, AppState>) -> String
 /// Replaces the user folder, the PC's label and every known name (longest first) with placeholders.
 fn anonymise(text: &str, names: &[(String, String)], profile: &str, pc: &str) -> String
 {
-    let mut t = text.to_string();
+    let mut cleaned = text.to_string();
 
     if profile.len() > 3
     {
-        t = t.replace(profile, "%USERPROFILE%");
+        cleaned = cleaned.replace(profile, "%USERPROFILE%");
     }
 
     if pc.len() > 1
     {
-        t = t.replace(pc, "[this PC]");
+        cleaned = cleaned.replace(pc, "[this PC]");
     }
 
-    for (k, v) in names
+    for (real, stand_in) in names
     {
-        t = replace_whole(&t, k, v);
+        cleaned = replace_whole(&cleaned, real, stand_in);
     }
 
-    t
+    cleaned
 }
 
 /// Replaces `from` only where it stands as a whole name, so "Ty" doesn't touch "Type".
@@ -2347,9 +2374,9 @@ mod support_tests
 
         assert_eq!(out, "Got Partner A's latest copy for Character 1; Partner A says hi; %USERPROFILE%\\AppData on [this PC]");
 
-        let ty = vec![("Ty".to_string(), "Partner B".to_string())];
+        let names = vec![("Ty".to_string(), "Partner B".to_string())];
 
-        assert_eq!(anonymise("Type /reload. Ty paired.", &ty, "", ""), "Type /reload. Partner B paired.");
+        assert_eq!(anonymise("Type /reload. Ty paired.", &names, "", ""), "Type /reload. Partner B paired.");
     }
 }
 
@@ -2360,13 +2387,13 @@ fn windows_version() -> String
     {
         use std::os::windows::process::CommandExt;
 
-        if let Ok(o) = std::process::Command::new("cmd").args(["/C", "ver"]).creation_flags(0x0800_0000).output()
+        if let Ok(output) = std::process::Command::new("cmd").args(["/C", "ver"]).creation_flags(0x0800_0000).output()
         {
-            let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            let version_text = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-            if !t.is_empty()
+            if !version_text.is_empty()
             {
-                return t;
+                return version_text;
             }
         }
     }
@@ -2375,10 +2402,10 @@ fn windows_version() -> String
 }
 
 #[tauri::command]
-fn dismiss_whats_new(app: AppHandle, st: State<'_, AppState>) -> Result<(), String>
+fn dismiss_whats_new(app: AppHandle, state: State<'_, AppState>) -> Result<(), String>
 {
     {
-        let mut inner = st.inner.lock().unwrap();
+        let mut inner = state.inner.lock().unwrap();
 
         inner.settings.seen_version = Some(VERSION.into());
         save_json("settings.json", &inner.settings)?;
@@ -2392,30 +2419,30 @@ static PLACE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 
 /// Notes the window's spot after a move or resize, and saves it once things settle
 /// (a drag sends many events). Minimized or hidden windows report odd spots, so those are skipped.
-fn remember_placement(w: &tauri::Window)
+fn remember_placement(win: &tauri::Window)
 {
-    if w.is_minimized().unwrap_or(false) || !w.is_visible().unwrap_or(false)
+    if win.is_minimized().unwrap_or(false) || !win.is_visible().unwrap_or(false)
     {
         return;
     }
 
-    let app = w.app_handle().clone();
+    let app = win.app_handle().clone();
     {
-        let st = app.state::<AppState>();
-        let mut inner = st.inner.lock().unwrap();
-        let mut p = inner.settings.window.unwrap_or_default();
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().unwrap();
+        let mut place = inner.settings.window.unwrap_or_default();
 
-        p.max = w.is_maximized().unwrap_or(false);
+        place.max = win.is_maximized().unwrap_or(false);
 
-        if !p.max
+        if !place.max
         {
-            if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size())
+            if let (Ok(pos), Ok(size)) = (win.outer_position(), win.inner_size())
             {
-                p = Placement { x: pos.x, y: pos.y, w: size.width, h: size.height, max: false };
+                place = Placement { x: pos.x, y: pos.y, w: size.width, h: size.height, max: false };
             }
         }
 
-        inner.settings.window = Some(p);
+        inner.settings.window = Some(place);
     }
 
     use std::sync::atomic::Ordering;
@@ -2428,8 +2455,8 @@ fn remember_placement(w: &tauri::Window)
 
         if PLACE_GEN.load(Ordering::SeqCst) == mine
         {
-            let st = app.state::<AppState>();
-            let inner = st.inner.lock().unwrap();
+            let state = app.state::<AppState>();
+            let inner = state.inner.lock().unwrap();
             let _ = save_json("settings.json", &inner.settings);
         }
     });
@@ -2438,40 +2465,41 @@ fn remember_placement(w: &tauri::Window)
 /// Puts the window back where it was, if that spot is still on a connected screen.
 fn restore_placement(app: &AppHandle)
 {
-    let Some(w) = app.get_webview_window("main") else { return };
+    let Some(win) = app.get_webview_window("main") else { return };
     let saved = app.state::<AppState>().inner.lock().unwrap().settings.window;
 
-    if let Some(p) = saved.filter(|p| p.w > 0 && p.h > 0)
+    if let Some(place) = saved.filter(|p| p.w > 0 && p.h > 0)
     {
         // The title bar's middle has to land on a screen, or the window could be unreachable.
-        let (cx, cy) = (p.x + p.w as i32 / 2, p.y + 20);
-        let on_screen = w.available_monitors().unwrap_or_default().iter().any(|m|
+        let (center_x, center_y) = (place.x + place.w as i32 / 2, place.y + 20);
+        let on_screen = win.available_monitors().unwrap_or_default().iter().any(|monitor|
         {
-            let (mp, ms) = (m.position(), m.size());
+            let (mon_pos, mon_size) = (monitor.position(), monitor.size());
 
-            cx >= mp.x && cx < mp.x + ms.width as i32 && cy >= mp.y && cy < mp.y + ms.height as i32
+            center_x >= mon_pos.x && center_x < mon_pos.x + mon_size.width as i32 && center_y >= mon_pos.y && center_y < mon_pos.y + mon_size.height as i32
         });
 
         if on_screen
         {
-            let _ = w.set_size(tauri::PhysicalSize::new(p.w, p.h));
-            let _ = w.set_position(tauri::PhysicalPosition::new(p.x, p.y));
+            let _ = win.set_size(tauri::PhysicalSize::new(place.w, place.h));
+            let _ = win.set_position(tauri::PhysicalPosition::new(place.x, place.y));
         }
 
-        if p.max
+        if place.max
         {
-            let _ = w.maximize();
+            let _ = win.maximize();
         }
     }
 }
 
+/// Brings the main window back from the tray.
 fn show_main(app: &AppHandle)
 {
-    if let Some(w) = app.get_webview_window("main")
+    if let Some(window) = app.get_webview_window("main")
     {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
     }
 }
 
@@ -2492,9 +2520,9 @@ fn crash_log(text: &str)
         let _ = fs::remove_file(&path);
     }
 
-    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&path)
+    if let Ok(mut log) = fs::OpenOptions::new().create(true).append(true).open(&path)
     {
-        let _ = writeln!(f, "{} v{VERSION}: {}", now(), text.replace('\n', " "));
+        let _ = writeln!(log, "{} v{VERSION}: {}", now(), text.replace('\n', " "));
     }
 }
 
@@ -2513,10 +2541,10 @@ fn startup_failed(err: &str)
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
-        let w = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let (t, c) = (w(&text), w("Sterling Quest Sync Companion"));
+        let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (wide_text, wide_caption) = (wide(&text), wide("Sterling Quest Sync Companion"));
 
-        unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_OK | MB_ICONERROR) };
+        unsafe { MessageBoxW(std::ptr::null_mut(), wide_text.as_ptr(), wide_caption.as_ptr(), MB_OK | MB_ICONERROR) };
     }
 
     #[cfg(not(windows))]
@@ -2524,6 +2552,7 @@ fn startup_failed(err: &str)
     std::process::exit(1);
 }
 
+/// Starts the app: tray, window, watchers and the background loop.
 fn main()
 {
     api::set_app_version(VERSION);
@@ -2539,10 +2568,10 @@ fn main()
     let settings: Settings = fs::read_to_string(app_data().join("settings.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     let session = settings.game.as_ref().and_then(|g| open_session(g).ok());
 
-    if let Some(s) = &session
+    if let Some(open_session) = &session
     {
         // Keep the companion's own files current; Inbox.lua is left alone.
-        let _ = companion::install(&s.fs, COMPANION_FILES);
+        let _ = companion::install(&open_session.fs, COMPANION_FILES);
     }
 
     let state = AppState
@@ -2609,16 +2638,16 @@ fn main()
 
             if !hidden
             {
-                if let Some(w) = app.get_webview_window("main")
+                if let Some(window) = app.get_webview_window("main")
                 {
-                    let _ = w.show();
-                    let _ = w.set_focus();
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
 
             {
-                let st = app.state::<AppState>();
-                let mut inner = st.inner.lock().unwrap();
+                let state = app.state::<AppState>();
+                let mut inner = state.inner.lock().unwrap();
 
                 // Keep the startup entry pointing at this copy of the app, but only while Windows still
                 // has it switched on: a startup entry turned off or removed outside the app stays off.
@@ -2655,20 +2684,20 @@ fn main()
                 "open" => show_main(app),
                 "sync" =>
                 {
-                    let h = app.clone();
+                    let app_handle = app.clone();
 
                     std::thread::spawn(move ||
                     {
-                        let _ = run_sync(&h);
+                        let _ = run_sync(&app_handle);
                     });
                 }
 
                 "quit" => app.exit(0),
                 _ => {}
             })
-            .on_tray_icon_event(|tray, e|
+            .on_tray_icon_event(|tray, event|
             {
-                if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e
+                if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event
                 {
                     show_main(tray.app_handle());
                 }
@@ -2721,10 +2750,10 @@ fn main()
             quit,
         ])
         .run(tauri::generate_context!())
-        .unwrap_or_else(|e|
+        .unwrap_or_else(|error|
         {
-            crash_log(&format!("couldn't start: {e}"));
-            startup_failed(&e.to_string());
+            crash_log(&format!("couldn't start: {error}"));
+            startup_failed(&error.to_string());
         });
 }
 

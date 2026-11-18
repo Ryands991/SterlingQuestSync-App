@@ -35,21 +35,22 @@ pub struct Release
     pub size: u64,
 }
 
-pub fn valid_version(v: &str) -> bool
+/// A version like 0.2.31.
+pub fn valid_version(version: &str) -> bool
 {
-    RE_VERSION.is_match(v)
+    RE_VERSION.is_match(version)
 }
 
 /// Compares dotted versions numerically ("0.2.30" > "0.2.9").
-pub fn newer(a: &str, b: &str) -> bool
+pub fn newer(left: &str, right: &str) -> bool
 {
-    let p = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
-    let (mut x, mut y) = (p(a), p(b));
-    let n = x.len().max(y.len());
+    let parts = |s: &str| s.split('.').map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
+    let (mut left, mut right) = (parts(left), parts(right));
+    let count = left.len().max(right.len());
 
-    x.resize(n, 0);
-    y.resize(n, 0);
-    x > y
+    left.resize(count, 0);
+    right.resize(count, 0);
+    left > right
 }
 
 /// The installed version, from `## Version:` in Sterling.toc.
@@ -60,15 +61,16 @@ pub fn installed_version(game: &Path) -> Option<String>
     toc.lines().find_map(|l| l.strip_prefix("## Version:").map(|v| v.trim().trim_start_matches('v').to_string())).filter(|v| valid_version(v))
 }
 
+/// The HTTP client for GitHub's release API.
 fn github() -> Result<reqwest::blocking::Client>
 {
     // Release downloads redirect to GitHub's file host; nothing else is followed.
-    let policy = reqwest::redirect::Policy::custom(|a|
+    let policy = reqwest::redirect::Policy::custom(|attempt|
     {
-        let ok = a.url().scheme() == "https"
-            && a.url().host_str().map(|h| h == "github.com" || h.ends_with(".github.com") || h.ends_with(".githubusercontent.com")).unwrap_or(false);
+        let ok = attempt.url().scheme() == "https"
+            && attempt.url().host_str().map(|h| h == "github.com" || h.ends_with(".github.com") || h.ends_with(".githubusercontent.com")).unwrap_or(false);
 
-        if ok && a.previous().len() < 5 { a.follow() } else { a.stop() }
+        if ok && attempt.previous().len() < 5 { attempt.follow() } else { attempt.stop() }
     });
 
     reqwest::blocking::Client::builder()
@@ -79,6 +81,7 @@ fn github() -> Result<reqwest::blocking::Client>
         .map_err(|e| Error::Server(format!("network setup failed: {e}")))
 }
 
+/// Sterling Quest Sync's newest release and its zip.
 pub fn latest_release() -> Result<Release>
 {
     #[derive(Deserialize)]
@@ -100,18 +103,18 @@ pub fn latest_release() -> Result<Release>
         prerelease: bool,
     }
 
-    let r = github()?
+    let response = github()?
         .get(format!("https://api.github.com/repos/{REPO}/releases/latest"))
         .header("Accept", "application/vnd.github+json")
         .send()
         .map_err(|_| Error::Offline)?;
 
-    if !r.status().is_success()
+    if !response.status().is_success()
     {
-        return Err(Error::Server(format!("GitHub said {}", r.status().as_u16())));
+        return Err(Error::Server(format!("GitHub said {}", response.status().as_u16())));
     }
 
-    let rel: Rel = r.json().map_err(|_| Error::Server("unexpected reply from GitHub".into()))?;
+    let rel: Rel = response.json().map_err(|_| Error::Server("unexpected reply from GitHub".into()))?;
     let version = rel.tag_name.trim_start_matches('v').to_string();
 
     if rel.draft || rel.prerelease || !valid_version(&version)
@@ -120,15 +123,15 @@ pub fn latest_release() -> Result<Release>
     }
 
     let want = format!("Sterling-{version}.zip");
-    let a = rel.assets.into_iter().find(|a| a.name == want).ok_or_else(|| Error::Server(format!("release has no {want}")))?;
+    let asset = rel.assets.into_iter().find(|a| a.name == want).ok_or_else(|| Error::Server(format!("release has no {want}")))?;
     let prefix = format!("https://github.com/{REPO}/releases/download/");
 
-    if !a.browser_download_url.starts_with(&prefix) || a.size > MAX_ZIP
+    if !asset.browser_download_url.starts_with(&prefix) || asset.size > MAX_ZIP
     {
         return Err(Error::Refused("release file isn't from the Sterling repo".into()));
     }
 
-    Ok(Release { version, url: a.browser_download_url, size: a.size })
+    Ok(Release { version, url: asset.browser_download_url, size: asset.size })
 }
 
 /// Newest published version of a repo's releases (tag like v0.1.3), or None if there isn't one.
@@ -140,30 +143,32 @@ pub fn latest_tag(repo: &str) -> Option<String>
         tag_name: String,
     }
 
-    let r = github().ok()?.get(format!("https://api.github.com/repos/{repo}/releases/latest")).header("Accept", "application/vnd.github+json").send().ok()?;
+    let response =
+        github().ok()?.get(format!("https://api.github.com/repos/{repo}/releases/latest")).header("Accept", "application/vnd.github+json").send().ok()?;
 
-    if !r.status().is_success()
+    if !response.status().is_success()
     {
         return None;
     }
 
-    let v = r.json::<Rel>().ok()?.tag_name.trim_start_matches('v').to_string();
+    let version = response.json::<Rel>().ok()?.tag_name.trim_start_matches('v').to_string();
 
-    valid_version(&v).then_some(v)
+    valid_version(&version).then_some(version)
 }
 
+/// Downloads a release zip, within the size cap.
 pub fn download(rel: &Release) -> Result<Vec<u8>>
 {
-    let r = github()?.get(&rel.url).send().map_err(|_| Error::Offline)?;
+    let response = github()?.get(&rel.url).send().map_err(|_| Error::Offline)?;
 
-    if !r.status().is_success()
+    if !response.status().is_success()
     {
-        return Err(Error::Server(format!("download failed ({})", r.status().as_u16())));
+        return Err(Error::Server(format!("download failed ({})", response.status().as_u16())));
     }
 
     let mut buf = Vec::new();
 
-    r.take(MAX_ZIP + 1).read_to_end(&mut buf)?;
+    response.take(MAX_ZIP + 1).read_to_end(&mut buf)?;
 
     if buf.len() as u64 > MAX_ZIP
     {
@@ -173,6 +178,7 @@ pub fn download(rel: &Release) -> Result<Vec<u8>>
     Ok(buf)
 }
 
+/// Unix time in seconds.
 fn now() -> u64
 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -188,24 +194,24 @@ fn entry_path(name: &str, enclosed: Option<PathBuf>) -> Result<Option<PathBuf>>
         return bad();
     }
 
-    let Some(p) = enclosed else { return bad() };
+    let Some(path) = enclosed else { return bad() };
     let mut parts = Vec::new();
 
-    for c in p.components()
+    for part in path.components()
     {
-        match c
+        match part
         {
-            Component::Normal(s) =>
+            Component::Normal(name) =>
             {
-                let s = s.to_string_lossy();
+                let name = name.to_string_lossy();
 
-                if !RE_FILE.is_match(&s) || s.starts_with('.') && s != ".pkgmeta"
+                if !RE_FILE.is_match(&name) || name.starts_with('.') && name != ".pkgmeta"
                 {
                     return bad();
                 }
 
                 // Windows quietly drops a trailing dot or space, and treats some names as devices.
-                let lower = s.to_ascii_lowercase();
+                let lower = name.to_ascii_lowercase();
                 let stem = lower.split('.').next().unwrap_or("");
                 let device = matches!(stem, "con" | "prn" | "aux" | "nul")
                     || (stem.len() == 4 && (stem.starts_with("com") || stem.starts_with("lpt")) && stem.as_bytes()[3].is_ascii_digit());
@@ -215,12 +221,12 @@ fn entry_path(name: &str, enclosed: Option<PathBuf>) -> Result<Option<PathBuf>>
                         .iter()
                         .any(|e| lower.ends_with(e));
 
-                if s.ends_with('.') || s.ends_with(' ') || device || runnable
+                if name.ends_with('.') || name.ends_with(' ') || device || runnable
                 {
                     return bad();
                 }
 
-                parts.push(s.into_owned());
+                parts.push(name.into_owned());
             }
 
             _ => return bad(),
@@ -238,9 +244,9 @@ fn entry_path(name: &str, enclosed: Option<PathBuf>) -> Result<Option<PathBuf>>
 /// Unpacks a Sterling zip into the staging folder after checking every entry.
 fn stage(fs_: &SafeFs, zip_bytes: &[u8], version: &str) -> Result<PathBuf>
 {
-    let mut z = zip::ZipArchive::new(Cursor::new(zip_bytes)).map_err(|_| Error::Refused("not a zip file".into()))?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(zip_bytes)).map_err(|_| Error::Refused("not a zip file".into()))?;
 
-    if z.len() > MAX_ENTRIES
+    if archive.len() > MAX_ENTRIES
     {
         return Err(Error::Refused("zip has too many files".into()));
     }
@@ -249,19 +255,19 @@ fn stage(fs_: &SafeFs, zip_bytes: &[u8], version: &str) -> Result<PathBuf>
     let mut total = 0u64;
     let mut has_toc = false;
 
-    for i in 0..z.len()
+    for i in 0..archive.len()
     {
-        let f = z.by_index(i).map_err(|_| Error::Refused("damaged zip".into()))?;
+        let file = archive.by_index(i).map_err(|_| Error::Refused("damaged zip".into()))?;
 
-        if f.is_symlink() || f.unix_mode().map(|m| m & 0o170000 == 0o120000).unwrap_or(false)
+        if file.is_symlink() || file.unix_mode().map(|m| m & 0o170000 == 0o120000).unwrap_or(false)
         {
             return Err(Error::Refused("zip contains a link".into()));
         }
 
-        let name = f.name().map_err(|_| Error::Refused("bad name in the zip".into()))?.into_owned();
-        let rel = entry_path(&name, f.enclosed_name())?;
+        let name = file.name().map_err(|_| Error::Refused("bad name in the zip".into()))?.into_owned();
+        let rel = entry_path(&name, file.enclosed_name())?;
 
-        total = total.saturating_add(f.size());
+        total = total.saturating_add(file.size());
 
         if rel.as_deref() == Some(Path::new("Sterling/Sterling.toc"))
         {
@@ -285,21 +291,21 @@ fn stage(fs_: &SafeFs, zip_bytes: &[u8], version: &str) -> Result<PathBuf>
 
     let mut written = 0u64;
 
-    for i in 0..z.len()
+    for i in 0..archive.len()
     {
-        let mut f = z.by_index(i).map_err(|_| Error::Refused("damaged zip".into()))?;
-        let name = f.name().map_err(|_| Error::Refused("bad name in the zip".into()))?.into_owned();
-        let Some(rel) = entry_path(&name, f.enclosed_name())? else { continue };
+        let mut file = archive.by_index(i).map_err(|_| Error::Refused("damaged zip".into()))?;
+        let name = file.name().map_err(|_| Error::Refused("bad name in the zip".into()))?.into_owned();
+        let Some(rel) = entry_path(&name, file.enclosed_name())? else { continue };
         let dst = staging.join(&rel);
 
-        if f.is_dir()
+        if file.is_dir()
         {
             fs_.create_dir_all(&dst)?;
             continue;
         }
 
         let mut buf = Vec::new();
-        (&mut f).take(MAX_UNPACKED - written + 1).read_to_end(&mut buf)?;
+        (&mut file).take(MAX_UNPACKED - written + 1).read_to_end(&mut buf)?;
         written += buf.len() as u64;
 
         if written > MAX_UNPACKED
@@ -315,13 +321,14 @@ fn stage(fs_: &SafeFs, zip_bytes: &[u8], version: &str) -> Result<PathBuf>
     Ok(staging.join("Sterling"))
 }
 
+/// Earlier add-on copies kept in _old, oldest first.
 fn old_copies(fs_: &SafeFs) -> Vec<PathBuf>
 {
-    let mut v: Vec<PathBuf> = fs::read_dir(fs_.root(Root::Companion).join("_old")).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    let mut old: Vec<PathBuf> = fs::read_dir(fs_.root(Root::Companion).join("_old")).into_iter().flatten().flatten().map(|e| e.path()).collect();
 
-    v.sort();
-    v.reverse();
-    v
+    old.sort();
+    old.reverse();
+    old
 }
 
 /// Installs a downloaded Sterling zip. Safe while the game is open; Sterling then needs a /reload.
@@ -342,14 +349,14 @@ pub fn install(fs_: &SafeFs, zip_bytes: &[u8], version: &str) -> Result<()>
         fs_.rename(&live, &aside)?;
     }
 
-    if let Err(e) = fs_.rename(&staged, &live)
+    if let Err(error) = fs_.rename(&staged, &live)
     {
         if had_old
         {
             let _ = fs_.rename(&aside, &live);
         }
 
-        return Err(e);
+        return Err(error);
     }
 
     fs_.remove_scratch(&fs_.root(Root::Companion).join("_staging"))?;
@@ -373,23 +380,23 @@ mod tests
     {
         let mut out = Cursor::new(Vec::new());
         {
-            let mut w = zip::ZipWriter::new(&mut out);
+            let mut writer = zip::ZipWriter::new(&mut out);
 
-            for (n, b) in entries
+            for (name, bytes) in entries
             {
-                if n.ends_with('/')
+                if name.ends_with('/')
                 {
-                    w.add_directory(*n, SimpleFileOptions::default()).unwrap();
+                    writer.add_directory(*name, SimpleFileOptions::default()).unwrap();
                 }
 
                 else
                 {
-                    w.start_file(*n, SimpleFileOptions::default()).unwrap();
-                    w.write_all(b).unwrap();
+                    writer.start_file(*name, SimpleFileOptions::default()).unwrap();
+                    writer.write_all(bytes).unwrap();
                 }
             }
 
-            w.finish().unwrap();
+            writer.finish().unwrap();
         }
 
         out.into_inner()
@@ -397,18 +404,18 @@ mod tests
 
     fn setup() -> (tempfile::TempDir, SafeFs)
     {
-        let t = tempfile::tempdir().unwrap();
-        let g = t.path().join("_forever_");
+        let temp = tempfile::tempdir().unwrap();
+        let game = temp.path().join("_forever_");
 
-        fs::create_dir_all(g.join("Interface/AddOns/Questie")).unwrap();
-        fs::write(g.join("Interface/AddOns/Questie/Questie.toc"), "q").unwrap();
-        fs::create_dir_all(g.join("Interface/AddOns/Sterling")).unwrap();
-        fs::write(g.join("Interface/AddOns/Sterling/Sterling.toc"), "## Version: 0.2.30\n").unwrap();
-        fs::create_dir_all(g.join("WTF/Account/A/SavedVariables")).unwrap();
-        fs::create_dir_all(g.join("Interface/AddOns/SterlingQuestSync")).unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/Questie")).unwrap();
+        fs::write(game.join("Interface/AddOns/Questie/Questie.toc"), "q").unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/Sterling")).unwrap();
+        fs::write(game.join("Interface/AddOns/Sterling/Sterling.toc"), "## Version: 0.2.30\n").unwrap();
+        fs::create_dir_all(game.join("WTF/Account/A/SavedVariables")).unwrap();
+        fs::create_dir_all(game.join("Interface/AddOns/SterlingQuestSync")).unwrap();
 
-        let s = SafeFs::new(&g, &t.path().join("appdata")).unwrap();
-        (t, s)
+        let safe = SafeFs::new(&game, &temp.path().join("appdata")).unwrap();
+        (temp, safe)
     }
 
     #[test]
@@ -423,25 +430,25 @@ mod tests
     #[test]
     fn installs_and_keeps_the_old_copy()
     {
-        let (_t, s) = setup();
-        let z = make_zip(&[("Sterling/", b""), ("Sterling/Sterling.toc", b"## Version: 0.2.31\n"), ("Sterling/Core/Main.lua", b"-- main")]);
+        let (_t, safe) = setup();
+        let zip = make_zip(&[("Sterling/", b""), ("Sterling/Sterling.toc", b"## Version: 0.2.31\n"), ("Sterling/Core/Main.lua", b"-- main")]);
 
-        install(&s, &z, "0.2.31").unwrap();
-        assert_eq!(installed_version(s.game()).as_deref(), Some("0.2.31"));
-        assert!(s.game().join("Interface/AddOns/Sterling/Core/Main.lua").is_file());
+        install(&safe, &zip, "0.2.31").unwrap();
+        assert_eq!(installed_version(safe.game()).as_deref(), Some("0.2.31"));
+        assert!(safe.game().join("Interface/AddOns/Sterling/Core/Main.lua").is_file());
 
-        let old = old_copies(&s);
+        let old = old_copies(&safe);
 
         assert_eq!(old.len(), 1);
         assert_eq!(fs::read_to_string(old[0].join("Sterling/Sterling.toc")).unwrap(), "## Version: 0.2.30\n");
-        assert!(!s.root(Root::Companion).join("_staging").exists());
-        assert_eq!(fs::read_to_string(s.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "q");
+        assert!(!safe.root(Root::Companion).join("_staging").exists());
+        assert_eq!(fs::read_to_string(safe.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "q");
     }
 
     #[test]
     fn refuses_unsafe_zips_and_changes_nothing()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
         let cases: Vec<Vec<u8>> = vec!
         [
             make_zip(&[("Sterling/Sterling.toc", b"x"), ("Sterling/../Questie/Questie.toc", b"pwned")]),
@@ -461,49 +468,49 @@ mod tests
             b"not a zip".to_vec(),
         ];
 
-        for z in cases
+        for case in cases
         {
-            assert!(install(&s, &z, "0.2.31").is_err());
-            assert_eq!(installed_version(s.game()).as_deref(), Some("0.2.30"));
-            assert_eq!(fs::read_to_string(s.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "q");
+            assert!(install(&safe, &case, "0.2.31").is_err());
+            assert_eq!(installed_version(safe.game()).as_deref(), Some("0.2.30"));
+            assert_eq!(fs::read_to_string(safe.game().join("Interface/AddOns/Questie/Questie.toc")).unwrap(), "q");
         }
 
-        assert!(install(&s, &make_zip(&[("Sterling/Sterling.toc", b"x")]), "../../WTF").is_err());
+        assert!(install(&safe, &make_zip(&[("Sterling/Sterling.toc", b"x")]), "../../WTF").is_err());
     }
 
     #[cfg(unix)]
     #[test]
     fn refuses_links_in_the_zip()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
         let mut out = Cursor::new(Vec::new());
         {
-            let mut w = zip::ZipWriter::new(&mut out);
+            let mut writer = zip::ZipWriter::new(&mut out);
 
-            w.start_file("Sterling/Sterling.toc", SimpleFileOptions::default()).unwrap();
-            w.write_all(b"x").unwrap();
-            w.add_symlink("Sterling/WTF", "../../../WTF", SimpleFileOptions::default()).unwrap();
-            w.finish().unwrap();
+            writer.start_file("Sterling/Sterling.toc", SimpleFileOptions::default()).unwrap();
+            writer.write_all(b"x").unwrap();
+            writer.add_symlink("Sterling/WTF", "../../../WTF", SimpleFileOptions::default()).unwrap();
+            writer.finish().unwrap();
         }
 
-        assert!(install(&s, &out.into_inner(), "0.2.31").is_err());
+        assert!(install(&safe, &out.into_inner(), "0.2.31").is_err());
     }
 
     #[test]
     fn keeps_only_a_few_old_copies()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
         for i in 31..37
         {
-            let v = format!("0.2.{i}");
-            let toc = format!("## Version: {v}\n");
+            let version = format!("0.2.{i}");
+            let toc = format!("## Version: {version}\n");
 
-            install(&s, &make_zip(&[("Sterling/Sterling.toc", toc.as_bytes())]), &v).unwrap();
+            install(&safe, &make_zip(&[("Sterling/Sterling.toc", toc.as_bytes())]), &version).unwrap();
             std::thread::sleep(Duration::from_millis(5));
         }
 
-        assert!(old_copies(&s).len() <= KEEP_OLD);
-        assert_eq!(installed_version(s.game()).as_deref(), Some("0.2.36"));
+        assert!(old_copies(&safe).len() <= KEEP_OLD);
+        assert_eq!(installed_version(safe.game()).as_deref(), Some("0.2.36"));
     }
 }

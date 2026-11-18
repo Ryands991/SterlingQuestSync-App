@@ -32,16 +32,16 @@ pub struct SafeFs
 }
 
 /// Rejects relative paths and any `..` or `.` component outright. No lexical tricks get through.
-fn plain_absolute(p: &Path) -> Result<()>
+fn plain_absolute(checked: &Path) -> Result<()>
 {
-    if !p.is_absolute()
+    if !checked.is_absolute()
     {
-        return Err(Error::Refused(format!("not an absolute path: {}", p.display())));
+        return Err(Error::Refused(format!("not an absolute path: {}", checked.display())));
     }
 
-    for c in p.components()
+    for part in checked.components()
     {
-        match c
+        match part
         {
             Component::ParentDir | Component::CurDir => return Err(Error::Refused("path contains . or ..".into())),
             // A colon past the drive letter is a Windows alternate stream ("WTF::$INDEX_ALLOCATION").
@@ -55,11 +55,11 @@ fn plain_absolute(p: &Path) -> Result<()>
 
 /// Resolves a path that may not exist yet: canonicalizes the deepest existing ancestor,
 /// refusing if any existing component is a symlink or junction.
-fn resolve(p: &Path) -> Result<PathBuf>
+fn resolve(wanted: &Path) -> Result<PathBuf>
 {
-    plain_absolute(p)?;
+    plain_absolute(wanted)?;
 
-    let mut existing = p.to_path_buf();
+    let mut existing = wanted.to_path_buf();
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
 
     loop
@@ -84,13 +84,13 @@ fn resolve(p: &Path) -> Result<PathBuf>
     // Walk every existing component and refuse links anywhere on the way.
     let mut walk = PathBuf::new();
 
-    for c in existing.components()
+    for part in existing.components()
     {
-        walk.push(c);
+        walk.push(part);
 
-        if let Ok(md) = fs::symlink_metadata(&walk)
+        if let Ok(meta) = fs::symlink_metadata(&walk)
         {
-            if md.file_type().is_symlink() || is_reparse_point(&md)
+            if meta.file_type().is_symlink() || is_reparse_point(&meta)
             {
                 return Err(Error::Refused(format!("link or junction in path: {}", walk.display())));
             }
@@ -108,11 +108,11 @@ fn resolve(p: &Path) -> Result<PathBuf>
 }
 
 #[cfg(windows)]
-fn is_reparse_point(md: &fs::Metadata) -> bool
+fn is_reparse_point(meta: &fs::Metadata) -> bool
 {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    md.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
 #[cfg(not(windows))]
@@ -122,11 +122,11 @@ fn is_reparse_point(_md: &fs::Metadata) -> bool
 }
 
 /// Strips Windows' `\\?\` prefix so comparisons work on plain paths.
-fn dunce(p: PathBuf) -> PathBuf
+fn dunce(path: PathBuf) -> PathBuf
 {
-    let s = p.to_string_lossy();
+    let text = path.to_string_lossy();
 
-    if let Some(rest) = s.strip_prefix(r"\\?\")
+    if let Some(rest) = text.strip_prefix(r"\\?\")
     {
         if !rest.starts_with("UNC\\")
         {
@@ -134,24 +134,25 @@ fn dunce(p: PathBuf) -> PathBuf
         }
     }
 
-    p
+    path
 }
 
 /// Case-insensitive on Windows and macOS (default file systems), exact on Linux.
-fn key(p: &Path) -> String
+fn key(path: &Path) -> String
 {
-    let s = p.to_string_lossy().replace('\\', "/");
-    let s = s.trim_end_matches('/').to_string();
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = text.trim_end_matches('/').to_string();
 
-    if cfg!(any(windows, target_os = "macos")) { s.to_lowercase() } else { s }
+    if cfg!(any(windows, target_os = "macos")) { text.to_lowercase() } else { text }
 }
 
+/// Is the child path inside the parent?
 fn is_within(child: &Path, parent: &Path) -> bool
 {
-    let c = key(child);
-    let p = key(parent);
+    let child_key = key(child);
+    let parent_key = key(parent);
 
-    c == p || c.starts_with(&(p + "/"))
+    child_key == parent_key || child_key.starts_with(&(parent_key + "/"))
 }
 
 /// Settings and other files the app keeps before a game folder is chosen.
@@ -180,17 +181,17 @@ pub fn write_app_file(app_data: &Path, name: &str, bytes: &[u8]) -> Result<()>
 
     let tmp = dir.join(format!(".{}.sqs-tmp-{}", name, rand::random::<u32>()));
     {
-        let mut f = fs::File::create(&tmp)?;
+        let mut file = fs::File::create(&tmp)?;
 
-        f.write_all(bytes)?;
-        f.sync_all()?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
     }
 
-    if let Err(e) = fs::rename(&tmp, &target)
+    if let Err(error) = fs::rename(&tmp, &target)
     {
         let _ = fs::remove_file(&tmp);
 
-        return Err(e.into());
+        return Err(error.into());
     }
 
     Ok(())
@@ -209,9 +210,9 @@ impl SafeFs
         Ok(SafeFs { wtf: game.join("WTF"), companion: addons.join("SterlingQuestSync"), sterling: addons.join("Sterling"), app_data: resolve(app_data)?, game })
     }
 
-    pub fn root(&self, r: Root) -> &Path
+    pub fn root(&self, which: Root) -> &Path
     {
-        match r
+        match which
         {
             Root::Companion => &self.companion,
             Root::Sterling => &self.sterling,
@@ -230,52 +231,52 @@ impl SafeFs
     }
 
     /// The single gate. Returns the resolved path if a write there is allowed.
-    pub fn check_write(&self, p: &Path) -> Result<PathBuf>
+    pub fn check_write(&self, path: &Path) -> Result<PathBuf>
     {
-        let r = resolve(p)?;
+        let real = resolve(path)?;
 
         // WTF first, before anything else can say yes.
-        if is_within(&r, &self.wtf)
+        if is_within(&real, &self.wtf)
         {
             return Err(Error::Refused("WTF is read-only for this app".into()));
         }
 
         for root in [&self.companion, &self.sterling, &self.app_data]
         {
-            if is_within(&r, root)
+            if is_within(&real, root)
             {
-                return Ok(r);
+                return Ok(real);
             }
         }
 
-        Err(Error::Refused(format!("outside the app's write allowlist: {}", r.display())))
+        Err(Error::Refused(format!("outside the app's write allowlist: {}", real.display())))
     }
 
     /// For a file the person picked in a Save dialog: anywhere except inside the game folder.
-    pub fn check_user_export(&self, p: &Path) -> Result<PathBuf>
+    pub fn check_user_export(&self, path: &Path) -> Result<PathBuf>
     {
-        let r = resolve(p)?;
+        let real = resolve(path)?;
 
-        if is_within(&r, &self.game) || is_within(&r, &self.wtf)
+        if is_within(&real, &self.game) || is_within(&real, &self.wtf)
         {
             return Err(Error::Refused("can't save inside the game folder".into()));
         }
 
-        Ok(r)
+        Ok(real)
     }
 
-    pub fn create_dir_all(&self, p: &Path) -> Result<()>
+    pub fn create_dir_all(&self, path: &Path) -> Result<()>
     {
-        let r = self.check_write(p)?;
+        let real = self.check_write(path)?;
 
-        fs::create_dir_all(r)?;
+        fs::create_dir_all(real)?;
         Ok(())
     }
 
     /// Writes a file so a reader never sees half of it: temp file in the same folder, flush, then rename.
-    pub fn write_atomic(&self, p: &Path, bytes: &[u8]) -> Result<()>
+    pub fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()>
     {
-        let target = self.check_write(p)?;
+        let target = self.check_write(path)?;
         let dir = target.parent().ok_or_else(|| Error::Refused("no parent folder".into()))?;
 
         self.create_dir_all(dir)?;
@@ -284,26 +285,26 @@ impl SafeFs
         let tmp = dir.join(format!(".{}.sqs-tmp-{}", name, rand::random::<u32>()));
         let tmp = self.check_write(&tmp)?;
         {
-            let mut f = fs::File::create(&tmp)?;
+            let mut file_out = fs::File::create(&tmp)?;
 
-            f.write_all(bytes)?;
-            f.sync_all()?;
+            file_out.write_all(bytes)?;
+            file_out.sync_all()?;
         }
 
-        if let Err(e) = fs::rename(&tmp, &target)
+        if let Err(error) = fs::rename(&tmp, &target)
         {
             let _ = fs::remove_file(&tmp);
 
-            return Err(e.into());
+            return Err(error.into());
         }
 
         Ok(())
     }
 
     /// Writes a file the person chose in a Save dialog.
-    pub fn write_user_export(&self, p: &Path, bytes: &[u8]) -> Result<()>
+    pub fn write_user_export(&self, path: &Path, bytes: &[u8]) -> Result<()>
     {
-        let target = self.check_user_export(p)?;
+        let target = self.check_user_export(path)?;
 
         fs::write(target, bytes)?;
         Ok(())
@@ -312,10 +313,10 @@ impl SafeFs
     /// Renames within the allowlist. Both ends are checked.
     pub fn rename(&self, from: &Path, to: &Path) -> Result<()>
     {
-        let a = self.check_write(from)?;
-        let b = self.check_write(to)?;
+        let source = self.check_write(from)?;
+        let dest = self.check_write(to)?;
 
-        if let Some(parent) = b.parent()
+        if let Some(parent) = dest.parent()
         {
             if !parent.is_dir()
             {
@@ -323,48 +324,48 @@ impl SafeFs
             }
         }
 
-        fs::rename(a, b)?;
+        fs::rename(source, dest)?;
         Ok(())
     }
 
     /// Copies a file from anywhere readable (including WTF) to an allowed place.
     pub fn copy_in(&self, src: &Path, dst: &Path) -> Result<()>
     {
-        let d = self.check_write(dst)?;
+        let dest = self.check_write(dst)?;
 
-        if let Some(parent) = d.parent()
+        if let Some(parent) = dest.parent()
         {
             self.create_dir_all(parent)?;
         }
 
-        let s = resolve(src)?;
+        let source = resolve(src)?;
 
-        fs::copy(s, d)?;
+        fs::copy(source, dest)?;
         Ok(())
     }
 
     /// Removes a folder tree, but only the app's own scratch areas:
     /// anything in the app data folder, or `_staging` / `_old` inside the companion add-on.
-    pub fn remove_scratch(&self, p: &Path) -> Result<()>
+    pub fn remove_scratch(&self, path: &Path) -> Result<()>
     {
-        let r = self.check_write(p)?;
-        let ok = (is_within(&r, &self.app_data) && key(&r) != key(&self.app_data))
-            || is_within(&r, &self.companion.join("_staging"))
-            || is_within(&r, &self.companion.join("_old"));
+        let real = self.check_write(path)?;
+        let ok = (is_within(&real, &self.app_data) && key(&real) != key(&self.app_data))
+            || is_within(&real, &self.companion.join("_staging"))
+            || is_within(&real, &self.companion.join("_old"));
 
         if !ok
         {
             return Err(Error::Refused("only the app's own scratch folders can be removed".into()));
         }
 
-        if r.is_dir()
+        if real.is_dir()
         {
-            fs::remove_dir_all(r)?;
+            fs::remove_dir_all(real)?;
         }
 
-        else if r.exists()
+        else if real.exists()
         {
-            fs::remove_file(r)?;
+            fs::remove_file(real)?;
         }
 
         Ok(())
@@ -378,8 +379,8 @@ mod tests
 
     fn setup() -> (tempfile::TempDir, SafeFs)
     {
-        let t = tempfile::tempdir().unwrap();
-        let game = t.path().join("World of Warcraft").join("_forever_");
+        let temp = tempfile::tempdir().unwrap();
+        let game = temp.path().join("World of Warcraft").join("_forever_");
 
         fs::create_dir_all(game.join("Interface/AddOns/Sterling")).unwrap();
         fs::create_dir_all(game.join("Interface/AddOns/Questie")).unwrap();
@@ -388,89 +389,89 @@ mod tests
         fs::write(game.join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua"), "SterlingQuestDB = {}").unwrap();
         fs::write(game.join("Interface/AddOns/Questie/Questie.toc"), "## Title: Questie").unwrap();
 
-        let app = t.path().join("AppData").join("SterlingQuestSync");
-        let s = SafeFs::new(&game, &app).unwrap();
-        (t, s)
+        let app = temp.path().join("AppData").join("SterlingQuestSync");
+        let safe = SafeFs::new(&game, &app).unwrap();
+        (temp, safe)
     }
 
     #[test]
     fn allows_the_three_roots()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
-        s.write_atomic(&s.root(Root::Companion).join("Inbox.lua"), b"x").unwrap();
-        s.write_atomic(&s.root(Root::Sterling).join("Core.lua"), b"x").unwrap();
-        s.write_atomic(&s.root(Root::AppData).join("state.json"), b"{}").unwrap();
+        safe.write_atomic(&safe.root(Root::Companion).join("Inbox.lua"), b"x").unwrap();
+        safe.write_atomic(&safe.root(Root::Sterling).join("Core.lua"), b"x").unwrap();
+        safe.write_atomic(&safe.root(Root::AppData).join("state.json"), b"{}").unwrap();
     }
 
     #[test]
     fn wtf_is_read_only_through_every_function()
     {
-        let (_t, s) = setup();
-        let sv = s.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua");
-        let new = s.wtf().join("Account/TESTACCOUNT/SavedVariables/New.lua");
+        let (_t, safe) = setup();
+        let saved_vars = safe.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua");
+        let new = safe.wtf().join("Account/TESTACCOUNT/SavedVariables/New.lua");
 
-        assert!(s.check_write(&sv).is_err());
-        assert!(s.write_atomic(&sv, b"bad").is_err());
-        assert!(s.write_atomic(&new, b"bad").is_err());
-        assert!(s.create_dir_all(&s.wtf().join("Account/X")).is_err());
-        assert!(s.rename(&sv, &s.root(Root::AppData).join("x")).is_err());
-        assert!(s.rename(&s.root(Root::AppData).join("state.json"), &new).is_err());
-        assert!(s.copy_in(&sv, &new).is_err());
-        assert!(s.remove_scratch(&sv).is_err());
-        assert!(s.remove_scratch(s.wtf()).is_err());
-        assert!(s.write_user_export(&new, b"bad").is_err());
-        assert_eq!(fs::read_to_string(&sv).unwrap(), "SterlingQuestDB = {}");
+        assert!(safe.check_write(&saved_vars).is_err());
+        assert!(safe.write_atomic(&saved_vars, b"bad").is_err());
+        assert!(safe.write_atomic(&new, b"bad").is_err());
+        assert!(safe.create_dir_all(&safe.wtf().join("Account/X")).is_err());
+        assert!(safe.rename(&saved_vars, &safe.root(Root::AppData).join("x")).is_err());
+        assert!(safe.rename(&safe.root(Root::AppData).join("state.json"), &new).is_err());
+        assert!(safe.copy_in(&saved_vars, &new).is_err());
+        assert!(safe.remove_scratch(&saved_vars).is_err());
+        assert!(safe.remove_scratch(safe.wtf()).is_err());
+        assert!(safe.write_user_export(&new, b"bad").is_err());
+        assert_eq!(fs::read_to_string(&saved_vars).unwrap(), "SterlingQuestDB = {}");
         assert!(!new.exists());
     }
 
     #[test]
     fn wtf_check_ignores_case_where_the_os_does()
     {
-        let (_t, s) = setup();
-        let sneaky = PathBuf::from(s.game().to_string_lossy().to_string()).join("wtf").join("Account").join("x.lua");
+        let (_t, safe) = setup();
+        let sneaky = PathBuf::from(safe.game().to_string_lossy().to_string()).join("wtf").join("Account").join("x.lua");
 
         if cfg!(any(windows, target_os = "macos"))
         {
-            assert!(s.check_write(&sneaky).is_err());
+            assert!(safe.check_write(&sneaky).is_err());
         }
 
         else
         {
             // Case-sensitive file system: "wtf" is a different folder, and still outside the allowlist.
-            assert!(s.check_write(&sneaky).is_err());
+            assert!(safe.check_write(&sneaky).is_err());
         }
     }
 
     #[test]
     fn refuses_dot_dot_and_relative_paths()
     {
-        let (_t, s) = setup();
-        let escape = s.root(Root::Companion).join("..").join("..").join("..").join("WTF").join("x.lua");
+        let (_t, safe) = setup();
+        let escape = safe.root(Root::Companion).join("..").join("..").join("..").join("WTF").join("x.lua");
 
-        assert!(s.check_write(&escape).is_err());
+        assert!(safe.check_write(&escape).is_err());
 
-        let escape2 = s.root(Root::AppData).join("..").join("evil.txt");
+        let escape2 = safe.root(Root::AppData).join("..").join("evil.txt");
 
-        assert!(s.check_write(&escape2).is_err());
-        assert!(s.check_write(Path::new("relative/Inbox.lua")).is_err());
+        assert!(safe.check_write(&escape2).is_err());
+        assert!(safe.check_write(Path::new("relative/Inbox.lua")).is_err());
     }
 
     #[test]
     fn other_addons_and_the_addons_folder_are_off_limits()
     {
-        let (_t, s) = setup();
-        let addons = s.game().join("Interface/AddOns");
+        let (_t, safe) = setup();
+        let addons = safe.game().join("Interface/AddOns");
 
-        assert!(s.write_atomic(&addons.join("Questie/Questie.toc"), b"bad").is_err());
-        assert!(s.write_atomic(&addons.join("Evil.lua"), b"bad").is_err());
-        assert!(s.create_dir_all(&addons.join("NewAddon")).is_err());
-        assert!(s.remove_scratch(&addons.join("Questie")).is_err());
-        assert!(s.remove_scratch(&addons.join("Sterling")).is_err());
-        assert!(s.remove_scratch(s.root(Root::Companion)).is_err());
+        assert!(safe.write_atomic(&addons.join("Questie/Questie.toc"), b"bad").is_err());
+        assert!(safe.write_atomic(&addons.join("Evil.lua"), b"bad").is_err());
+        assert!(safe.create_dir_all(&addons.join("NewAddon")).is_err());
+        assert!(safe.remove_scratch(&addons.join("Questie")).is_err());
+        assert!(safe.remove_scratch(&addons.join("Sterling")).is_err());
+        assert!(safe.remove_scratch(safe.root(Root::Companion)).is_err());
         // A folder named like ours but longer is not ours.
-        assert!(s.write_atomic(&addons.join("SterlingQuestSyncEvil/x.lua"), b"bad").is_err());
-        assert!(s.write_atomic(&addons.join("SterlingHunter/x.lua"), b"bad").is_err());
+        assert!(safe.write_atomic(&addons.join("SterlingQuestSyncEvil/x.lua"), b"bad").is_err());
+        assert!(safe.write_atomic(&addons.join("SterlingHunter/x.lua"), b"bad").is_err());
         assert_eq!(fs::read_to_string(addons.join("Questie/Questie.toc")).unwrap(), "## Title: Questie");
     }
 
@@ -478,62 +479,62 @@ mod tests
     #[test]
     fn refuses_links_into_wtf()
     {
-        let (_t, s) = setup();
-        let link = s.root(Root::Companion).join("sneaky");
+        let (_t, safe) = setup();
+        let link = safe.root(Root::Companion).join("sneaky");
 
-        std::os::unix::fs::symlink(s.wtf(), &link).unwrap();
-        assert!(s.write_atomic(&link.join("Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
+        std::os::unix::fs::symlink(safe.wtf(), &link).unwrap();
+        assert!(safe.write_atomic(&link.join("Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
 
-        let link2 = s.root(Root::AppData).join("sneaky2");
+        let link2 = safe.root(Root::AppData).join("sneaky2");
 
-        std::os::unix::fs::symlink(s.wtf().join("Account"), &link2).unwrap();
-        assert!(s.write_atomic(&link2.join("x.lua"), b"bad").is_err());
-        assert_eq!(fs::read_to_string(s.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua")).unwrap(), "SterlingQuestDB = {}");
+        std::os::unix::fs::symlink(safe.wtf().join("Account"), &link2).unwrap();
+        assert!(safe.write_atomic(&link2.join("x.lua"), b"bad").is_err());
+        assert_eq!(fs::read_to_string(safe.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua")).unwrap(), "SterlingQuestDB = {}");
     }
 
     #[test]
     fn scratch_removal_is_limited()
     {
-        let (_t, s) = setup();
-        let staging = s.root(Root::Companion).join("_staging/0.2.38");
+        let (_t, safe) = setup();
+        let staging = safe.root(Root::Companion).join("_staging/0.2.38");
 
-        s.create_dir_all(&staging).unwrap();
-        s.remove_scratch(&staging).unwrap();
-        assert!(s.remove_scratch(&s.root(Root::Companion).join("Inbox.lua")).is_err());
-        assert!(s.remove_scratch(s.root(Root::AppData)).is_err());
+        safe.create_dir_all(&staging).unwrap();
+        safe.remove_scratch(&staging).unwrap();
+        assert!(safe.remove_scratch(&safe.root(Root::Companion).join("Inbox.lua")).is_err());
+        assert!(safe.remove_scratch(safe.root(Root::AppData)).is_err());
 
-        let tmp = s.root(Root::AppData).join("staging");
+        let tmp = safe.root(Root::AppData).join("staging");
 
-        s.create_dir_all(&tmp).unwrap();
-        s.remove_scratch(&tmp).unwrap();
+        safe.create_dir_all(&tmp).unwrap();
+        safe.remove_scratch(&tmp).unwrap();
     }
 
     #[test]
     fn user_export_refuses_game_folder()
     {
-        let (t, s) = setup();
+        let (temp, safe) = setup();
 
-        assert!(s.write_user_export(&s.root(Root::Companion).join("code.txt"), b"x").is_err());
-        assert!(s.write_user_export(&s.game().join("code.txt"), b"x").is_err());
+        assert!(safe.write_user_export(&safe.root(Root::Companion).join("code.txt"), b"x").is_err());
+        assert!(safe.write_user_export(&safe.game().join("code.txt"), b"x").is_err());
 
-        let ok = t.path().join("Documents").join("sterling-quest-sync-recovery.txt");
+        let ok = temp.path().join("Documents").join("sterling-quest-sync-recovery.txt");
 
         fs::create_dir_all(ok.parent().unwrap()).unwrap();
-        s.write_user_export(&ok, b"SQS-XXXX").unwrap();
+        safe.write_user_export(&ok, b"SQS-XXXX").unwrap();
     }
 
     #[test]
     fn atomic_write_leaves_no_temp_files()
     {
-        let (_t, s) = setup();
-        let p = s.root(Root::Companion).join("Inbox.lua");
+        let (_t, safe) = setup();
+        let path = safe.root(Root::Companion).join("Inbox.lua");
 
-        s.write_atomic(&p, b"one").unwrap();
-        s.write_atomic(&p, b"two").unwrap();
-        assert_eq!(fs::read_to_string(&p).unwrap(), "two");
+        safe.write_atomic(&path, b"one").unwrap();
+        safe.write_atomic(&path, b"two").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "two");
 
         let leftovers: Vec<_> =
-            fs::read_dir(s.root(Root::Companion)).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains("sqs-tmp")).collect();
+            fs::read_dir(safe.root(Root::Companion)).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().contains("sqs-tmp")).collect();
 
         assert!(leftovers.is_empty());
     }
@@ -541,14 +542,14 @@ mod tests
     #[test]
     fn refuses_alternate_streams()
     {
-        let (_t, s) = setup();
-        let ads = PathBuf::from(format!("{}::$INDEX_ALLOCATION", s.wtf().display())).join("x.lua");
+        let (_t, safe) = setup();
+        let ads = PathBuf::from(format!("{}::$INDEX_ALLOCATION", safe.wtf().display())).join("x.lua");
 
-        assert!(s.check_write(&ads).is_err());
+        assert!(safe.check_write(&ads).is_err());
 
-        let ads2 = PathBuf::from(format!("{}:evil", s.root(Root::Companion).join("Inbox.lua").display()));
+        let ads2 = PathBuf::from(format!("{}:evil", safe.root(Root::Companion).join("Inbox.lua").display()));
 
-        assert!(s.check_write(&ads2).is_err());
+        assert!(safe.check_write(&ads2).is_err());
     }
 
     // ---- Windows only: real junctions, 8.3 short names, trailing dots. These run on the Windows
@@ -563,93 +564,93 @@ mod tests
     }
 
     #[cfg(windows)]
-    fn short_name(p: &Path) -> PathBuf
+    fn short_name(path: &Path) -> PathBuf
     {
         use std::os::windows::process::CommandExt;
 
         // raw_arg: cmd reads its own quoting, not the C runtime's.
-        let out = std::process::Command::new("cmd").raw_arg(format!("/C for %I in (\"{}\") do @echo %~sI", p.display())).output().expect("cmd");
+        let out = std::process::Command::new("cmd").raw_arg(format!("/C for %I in (\"{}\") do @echo %~sI", path.display())).output().expect("cmd");
 
         PathBuf::from(String::from_utf8_lossy(&out.stdout).trim().to_string())
     }
 
     #[cfg(windows)]
-    fn sterling_lua(s: &SafeFs) -> String
+    fn sterling_lua(safe: &SafeFs) -> String
     {
-        fs::read_to_string(s.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua")).unwrap()
+        fs::read_to_string(safe.wtf().join("Account/TESTACCOUNT/SavedVariables/Sterling.lua")).unwrap()
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_junctions_into_wtf_are_refused()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
         // A junction inside our own folder that points into WTF.
-        let j = s.root(Root::Companion).join("sneaky");
+        let outside = safe.root(Root::Companion).join("sneaky");
 
-        junction(&j, s.wtf());
-        assert!(s.write_atomic(&j.join("Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
-        assert!(s.write_atomic(&j.join("New.lua"), b"bad").is_err());
-        assert!(s.create_dir_all(&j.join("Made")).is_err());
+        junction(&outside, safe.wtf());
+        assert!(safe.write_atomic(&outside.join("Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
+        assert!(safe.write_atomic(&outside.join("New.lua"), b"bad").is_err());
+        assert!(safe.create_dir_all(&outside.join("Made")).is_err());
 
         // One in the app's data folder too.
-        let j2 = s.root(Root::AppData).join("sneaky2");
+        let outside2 = safe.root(Root::AppData).join("sneaky2");
 
-        junction(&j2, &s.wtf().join("Account"));
-        assert!(s.write_atomic(&j2.join("x.lua"), b"bad").is_err());
-        assert!(s.remove_scratch(&j2).is_err(), "never follows a junction to delete");
-        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
-        assert!(!s.wtf().join("New.lua").exists() && !s.wtf().join("Made").exists());
+        junction(&outside2, &safe.wtf().join("Account"));
+        assert!(safe.write_atomic(&outside2.join("x.lua"), b"bad").is_err());
+        assert!(safe.remove_scratch(&outside2).is_err(), "never follows a junction to delete");
+        assert_eq!(sterling_lua(&safe), "SterlingQuestDB = {}");
+        assert!(!safe.wtf().join("New.lua").exists() && !safe.wtf().join("Made").exists());
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_companion_folder_swapped_for_a_junction_is_refused()
     {
-        let (_t, s) = setup();
+        let (_t, safe) = setup();
 
         // Someone replaces the whole SterlingQuestSync folder with a junction to SavedVariables.
-        fs::remove_dir_all(s.root(Root::Companion)).unwrap();
-        junction(s.root(Root::Companion), &s.wtf().join("Account/TESTACCOUNT/SavedVariables"));
-        assert!(s.write_atomic(&s.root(Root::Companion).join("Inbox.lua"), b"bad").is_err());
-        assert!(s.write_atomic(&s.root(Root::Companion).join("Sterling.lua"), b"bad").is_err());
-        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
-        assert!(!s.wtf().join("Account/TESTACCOUNT/SavedVariables/Inbox.lua").exists());
+        fs::remove_dir_all(safe.root(Root::Companion)).unwrap();
+        junction(safe.root(Root::Companion), &safe.wtf().join("Account/TESTACCOUNT/SavedVariables"));
+        assert!(safe.write_atomic(&safe.root(Root::Companion).join("Inbox.lua"), b"bad").is_err());
+        assert!(safe.write_atomic(&safe.root(Root::Companion).join("Sterling.lua"), b"bad").is_err());
+        assert_eq!(sterling_lua(&safe), "SterlingQuestDB = {}");
+        assert!(!safe.wtf().join("Account/TESTACCOUNT/SavedVariables/Inbox.lua").exists());
     }
 
     #[cfg(windows)]
     #[test]
     fn windows_short_names_and_odd_spellings_still_find_wtf()
     {
-        let (_t, s) = setup();
-        let sv = s.wtf().join("Account/TESTACCOUNT/SavedVariables");
+        let (_t, safe) = setup();
+        let saved_vars = safe.wtf().join("Account/TESTACCOUNT/SavedVariables");
         // 8.3 short form of the game folder ("WORLDO~1\_FOREV~1"), when the drive has short names.
-        let short_game = short_name(s.game());
+        let short_game = short_name(safe.game());
 
         eprintln!("game folder short name: {}", short_game.display());
-        assert!(s.check_write(&short_game.join("WTF").join("x.lua")).is_err());
-        assert!(s.write_atomic(&short_game.join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
+        assert!(safe.check_write(&short_game.join("WTF").join("x.lua")).is_err());
+        assert!(safe.write_atomic(&short_game.join("WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua"), b"bad").is_err());
 
-        let short_sv = short_name(&sv);
+        let short_sv = short_name(&saved_vars);
 
-        assert!(s.write_atomic(&short_sv.join("Sterling.lua"), b"bad").is_err());
+        assert!(safe.write_atomic(&short_sv.join("Sterling.lua"), b"bad").is_err());
 
         // Letter case, trailing dots and spaces, forward slashes.
         for spelled in ["Wtf", "wTF", "WTF.", "WTF ", "WTF. .", "wtf..."]
         {
-            let p = PathBuf::from(format!("{}\\{}\\Account\\TESTACCOUNT\\SavedVariables\\Sterling.lua", s.game().display(), spelled));
+            let path = PathBuf::from(format!("{}\\{}\\Account\\TESTACCOUNT\\SavedVariables\\Sterling.lua", safe.game().display(), spelled));
 
-            assert!(s.write_atomic(&p, b"bad").is_err(), "{spelled}");
+            assert!(safe.write_atomic(&path, b"bad").is_err(), "{spelled}");
         }
 
-        let fwd = PathBuf::from(format!("{}/WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua", s.game().display()));
+        let fwd = PathBuf::from(format!("{}/WTF/Account/TESTACCOUNT/SavedVariables/Sterling.lua", safe.game().display()));
 
-        assert!(s.write_atomic(&fwd, b"bad").is_err());
+        assert!(safe.write_atomic(&fwd, b"bad").is_err());
 
         // The short form of our own folder still works (no false alarms).
-        let short_comp = short_name(s.root(Root::Companion));
+        let short_comp = short_name(safe.root(Root::Companion));
 
-        s.write_atomic(&short_comp.join("Inbox.lua"), b"ok").unwrap();
-        assert_eq!(sterling_lua(&s), "SterlingQuestDB = {}");
+        safe.write_atomic(&short_comp.join("Inbox.lua"), b"ok").unwrap();
+        assert_eq!(sterling_lua(&safe), "SterlingQuestDB = {}");
     }
 }

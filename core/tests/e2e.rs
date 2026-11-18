@@ -20,6 +20,7 @@ const KAEL: &str = "Player-6800-0000A11C";
 const BRAN: &str = "Player-6800-0A1B2C3D";
 const REALM: &str = "CAMWOW US2 Realm 2 PvP";
 
+/// Unix time in seconds.
 fn now() -> i64
 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64
@@ -63,27 +64,31 @@ impl Pc
     /// Same, plus codes Sterling received from partners in game (auto-pairing).
     fn game_saves_codes(&self, guid: &str, name: &str, saved: i64, self_copy: &str, partners: &[(&str, Option<&str>, i64)], codes: &[(&str, &str)])
     {
-        let mut c = String::new();
+        let mut chars = String::new();
 
         for (from, code) in codes
         {
-            c.push_str(&format!("[\"{from}\"] = {{ [\"code\"] = \"{code}\", [\"time\"] = {saved} }},\n"));
+            chars.push_str(&format!("[\"{from}\"] = {{ [\"code\"] = \"{code}\", [\"time\"] = {saved} }},\n"));
         }
 
-        let mut p = String::new();
+        let mut partners_lua = String::new();
 
-        for (g, packet, change) in partners
+        for (partner_guid, packet, change) in partners
         {
             match packet
             {
-                Some(pk) => p.push_str(&format!("[\"{g}\"] = {{ [\"packet\"] = \"{pk}\", [\"change\"] = {change}, [\"app\"] = \"0.1.9\" }},\n")),
-                None => p.push_str(&format!("[\"{g}\"] = {{ [\"removed\"] = true, [\"change\"] = {change} }},\n")),
+                Some(pk) =>
+                {
+                    partners_lua.push_str(&format!("[\"{partner_guid}\"] = {{ [\"packet\"] = \"{pk}\", [\"change\"] = {change}, [\"app\"] = \"0.1.9\" }},\n"))
+                }
+
+                None => partners_lua.push_str(&format!("[\"{partner_guid}\"] = {{ [\"removed\"] = true, [\"change\"] = {change} }},\n")),
             }
         }
 
         let text = format!
         (
-            "SterlingQuestSyncOut = {{\n[\"format\"] = 1,\n[\"characters\"] = {{\n[\"{guid}\"] = {{\n[\"name\"] = \"{name}\",\n[\"realm\"] = \"{REALM}\",\n[\"saved\"] = {saved},\n[\"proto\"] = 6,\n[\"self\"] = \"{self_copy}\",\n[\"partners\"] = {{\n{p}}},\n[\"codes\"] = {{\n{c}}},\n}},\n}},\n}}\n"
+            "SterlingQuestSyncOut = {{\n[\"format\"] = 1,\n[\"characters\"] = {{\n[\"{guid}\"] = {{\n[\"name\"] = \"{name}\",\n[\"realm\"] = \"{REALM}\",\n[\"saved\"] = {saved},\n[\"proto\"] = 6,\n[\"self\"] = \"{self_copy}\",\n[\"partners\"] = {{\n{partners_lua}}},\n[\"codes\"] = {{\n{chars}}},\n}},\n}},\n}}\n"
         );
 
         fs::write(paths::outbox_file(self.fs.game(), &self.acct), text).unwrap();
@@ -91,13 +96,13 @@ impl Pc
 
     fn sync(&mut self) -> sqs_core::engine::Report
     {
-        let o = match fs::read_to_string(paths::outbox_file(self.fs.game(), &self.acct))
+        let outbox = match fs::read_to_string(paths::outbox_file(self.fs.game(), &self.acct))
         {
             Ok(t) => vec![parse_outbox(&t).unwrap()],
             Err(_) => vec![],
         };
 
-        sync(&self.api, &self.fs, &mut self.state, &o, None, now()).unwrap()
+        sync(&self.api, &self.fs, &mut self.state, &outbox, None, now()).unwrap()
     }
 
     fn inbox_lua(&self) -> String
@@ -107,28 +112,29 @@ impl Pc
 
     fn wtf_snapshot(&self) -> Vec<(PathBuf, Vec<u8>)>
     {
-        let mut v = Vec::new();
+        let mut files = Vec::new();
 
-        walk(&self.fs.game().join("WTF"), &mut v);
-        v.sort();
-        v
+        walk(&self.fs.game().join("WTF"), &mut files);
+        files.sort();
+        files
     }
 }
 
-fn walk(d: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>)
+/// Every file under a folder, with its bytes.
+fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>)
 {
-    for e in fs::read_dir(d).unwrap().flatten()
+    for entry in fs::read_dir(dir).unwrap().flatten()
     {
-        let p = e.path();
+        let path = entry.path();
 
-        if p.is_dir()
+        if path.is_dir()
         {
-            walk(&p, out);
+            walk(&path, out);
         }
 
         else
         {
-            out.push((p.clone(), fs::read(&p).unwrap()));
+            out.push((path.clone(), fs::read(&path).unwrap()));
         }
     }
 }
@@ -142,19 +148,19 @@ fn three_pcs_full_flow()
         return;
     };
 
-    let t0 = now();
+    let started = now();
 
     let mut kael = Pc::new(&server, "TESTACCOUNT");
     let mut bran = Pc::new(&server, "PARTNERACCT");
-    let ra = kael.api.join("Kael PC", None).unwrap();
-    let sa = bran.api.join("Bran PC", None).unwrap();
+    let kael_join = kael.api.join("Kael PC", None).unwrap();
+    let bran_join = bran.api.join("Bran PC", None).unwrap();
 
-    assert!(ra.recovery_code.as_deref().unwrap().starts_with("SQS-"));
-    assert_ne!(ra.account_id, sa.account_id);
+    assert!(kael_join.recovery_code.as_deref().unwrap().starts_with("SQS-"));
+    assert_ne!(kael_join.account_id, bran_join.account_id);
 
     // Both log out once: characters get listed, self copies go up.
-    kael.game_saves(KAEL, "Kaelith Emberfall", t0, "KAELSELF1", &[]);
-    bran.game_saves(BRAN, "Brannoc Ashvale", t0, "BRANSELF1", &[]);
+    kael.game_saves(KAEL, "Kaelith Emberfall", started, "KAELSELF1", &[]);
+    bran.game_saves(BRAN, "Brannoc Ashvale", started, "BRANSELF1", &[]);
     assert_eq!(kael.sync().uploaded, 1);
     assert_eq!(bran.sync().uploaded, 1);
 
@@ -168,22 +174,22 @@ fn three_pcs_full_flow()
     assert!(bran.api.redeem_code(BRAN, &code.code, false).is_err(), "single use");
 
     // Next logout carries a copy for the partner.
-    kael.game_saves(KAEL, "Kaelith Emberfall", t0 + 60, "KAELSELF2", &[(BRAN, Some("FROMKAEL1"), 1)]);
+    kael.game_saves(KAEL, "Kaelith Emberfall", started + 60, "KAELSELF2", &[(BRAN, Some("FROMKAEL1"), 1)]);
 
-    let r = kael.sync();
+    let report = kael.sync();
 
-    assert_eq!(r.uploaded, 2, "{r:?}");
+    assert_eq!(report.uploaded, 2, "{report:?}");
 
     let before = bran.wtf_snapshot();
-    let r = bran.sync();
+    let report = bran.sync();
 
-    assert!(r.inbox_written && r.received >= 1, "{r:?}");
+    assert!(report.inbox_written && report.received >= 1, "{report:?}");
     assert_eq!(before, bran.wtf_snapshot(), "WTF untouched by a sync");
 
     let lua = bran.inbox_lua();
-    let v = parse_saved_variables(&lua).unwrap();
-    let me = v["SterlingQuestSync_Inbox"].as_table().unwrap().get("chars").unwrap().as_table().unwrap().get(BRAN).unwrap().as_table().unwrap();
-    let pk = me
+    let vars = parse_saved_variables(&lua).unwrap();
+    let me = vars["SterlingQuestSync_Inbox"].as_table().unwrap().get("chars").unwrap().as_table().unwrap().get(BRAN).unwrap().as_table().unwrap();
+    let packet = me
         .get("packets")
         .unwrap()
         .as_table()
@@ -193,7 +199,7 @@ fn three_pcs_full_flow()
         .map(|p| p.as_table().unwrap().get("data").unwrap().as_str().unwrap().to_string())
         .collect::<Vec<_>>();
 
-    assert!(pk.contains(&"FROMKAEL1".to_string()), "{pk:?}");
+    assert!(packet.contains(&"FROMKAEL1".to_string()), "{packet:?}");
     assert!(!lua.contains("Kaelith Emberfall"), "no names in the inbox");
 
     let pair = &bran.state.inbox.chars[BRAN].pairs[0];
@@ -205,58 +211,58 @@ fn three_pcs_full_flow()
     {
         kael.sync();
 
-        let p = &kael.state.inbox.chars[KAEL].pairs[0];
-        (p.my_key.clone(), p.partner_key.clone())
+        let partner = &kael.state.inbox.chars[KAEL].pairs[0];
+        (partner.my_key.clone(), partner.partner_key.clone())
     };
 
     assert_eq!(kael_pair_keys, (pair.partner_key.clone(), pair.my_key.clone()), "keys mirror on both sides");
 
     // Bran answers; Kael receives.
-    bran.game_saves(BRAN, "Brannoc Ashvale", t0 + 120, "BRANSELF2", &[(KAEL, Some("FROMBRAN1"), 1)]);
+    bran.game_saves(BRAN, "Brannoc Ashvale", started + 120, "BRANSELF2", &[(KAEL, Some("FROMBRAN1"), 1)]);
     bran.sync();
     kael.sync();
     assert!(kael.state.inbox.chars[KAEL].packets.iter().any(|p| p.data == "FROMBRAN1" && p.kind == Kind::Partner));
 
     // An older save from another install can't overwrite a newer one.
-    kael.game_saves(KAEL, "Kaelith Emberfall", t0 + 30, "KAELOLD", &[(BRAN, Some("OLDCOPY"), 1)]);
+    kael.game_saves(KAEL, "Kaelith Emberfall", started + 30, "KAELOLD", &[(BRAN, Some("OLDCOPY"), 1)]);
     kael.state.sent.clear();
 
-    let r = kael.sync();
+    let report = kael.sync();
 
-    assert_eq!(r.stale.len(), 2, "{r:?}");
+    assert_eq!(report.stale.len(), 2, "{report:?}");
     bran.sync();
     assert!(!bran.inbox_lua().contains("OLDCOPY"));
 
     // A second PC joins Kael's account with a link code and gets the self copy.
     let link = kael.api.link_code().unwrap();
     let mut kael2 = Pc::new(&server, "TESTACCOUNT");
-    let j = kael2.api.redeem_link(&link.code, "Kael laptop").unwrap();
+    let joined = kael2.api.redeem_link(&link.code, "Kael laptop").unwrap();
 
-    assert_eq!(j.account_id, ra.account_id);
+    assert_eq!(joined.account_id, kael_join.account_id);
     assert!(kael2.api.redeem_link(&link.code, "again").is_err(), "link code single use");
     assert_eq!(kael2.api.account().unwrap().pcs.len(), 2);
     kael2.state.listed.insert(KAEL.into(), sqs_core::api::Character { guid: KAEL.into(), name: "Kaelith Emberfall".into(), realm: REALM.into() });
     kael2.sync();
 
-    let c = &kael2.state.inbox.chars[KAEL];
+    let character = &kael2.state.inbox.chars[KAEL];
 
-    assert!(c.packets.iter().any(|p| p.kind == Kind::SelfCopy && p.data == "KAELSELF2"), "{:?}", c.packets);
-    assert!(c.packets.iter().any(|p| p.data == "FROMBRAN1"), "partners carry over to the new PC");
-    assert!(c.pairs.iter().any(|p| p.status == PairStatus::Active));
+    assert!(character.packets.iter().any(|p| p.kind == Kind::SelfCopy && p.data == "KAELSELF2"), "{:?}", character.packets);
+    assert!(character.packets.iter().any(|p| p.data == "FROMBRAN1"), "partners carry over to the new PC");
+    assert!(character.pairs.iter().any(|p| p.status == PairStatus::Active));
 
     // Bran removes Kael in game: the pairing ends and Kael's side drops her copy and keys.
-    bran.game_saves(BRAN, "Brannoc Ashvale", t0 + 180, "BRANSELF3", &[(KAEL, None, now() + 5)]);
+    bran.game_saves(BRAN, "Brannoc Ashvale", started + 180, "BRANSELF3", &[(KAEL, None, now() + 5)]);
 
-    let r = bran.sync();
+    let report = bran.sync();
 
-    assert_eq!(r.ended.len(), 1, "{r:?}");
+    assert_eq!(report.ended.len(), 1, "{report:?}");
     kael.sync();
 
-    let c = &kael.state.inbox.chars[KAEL];
+    let character = &kael.state.inbox.chars[KAEL];
 
-    assert_eq!(c.pairs[0].status, PairStatus::Ended);
-    assert!(c.pairs[0].my_key.is_none());
-    assert!(!c.packets.iter().any(|p| p.kind == Kind::Partner));
+    assert_eq!(character.pairs[0].status, PairStatus::Ended);
+    assert!(character.pairs[0].my_key.is_none());
+    assert!(!character.packets.iter().any(|p| p.kind == Kind::Partner));
 
     // Delete my data: both accounts gone, keys stop working.
     kael.api.delete_account().unwrap();
@@ -280,7 +286,7 @@ fn sterling_partners_pair_on_their_own()
         return;
     };
 
-    let t0 = now();
+    let started = now();
     let mut kael = Pc::new(&server, "TESTACCOUNT");
     let mut bran = Pc::new(&server, "PARTNERACCT");
 
@@ -288,13 +294,13 @@ fn sterling_partners_pair_on_their_own()
     bran.api.join("Bran PC", None).unwrap();
 
     // Already Sterling partners in game, never paired in the app.
-    kael.game_saves(KAEL, "Kaelith Emberfall", t0, "RS1", &[(BRAN, Some("R2S1"), 1)]);
-    bran.game_saves(BRAN, "Brannoc Ashvale", t0, "SS1", &[(KAEL, Some("S2R1"), 1)]);
+    kael.game_saves(KAEL, "Kaelith Emberfall", started, "RS1", &[(BRAN, Some("R2S1"), 1)]);
+    bran.game_saves(BRAN, "Brannoc Ashvale", started, "SS1", &[(KAEL, Some("S2R1"), 1)]);
 
-    let r = kael.sync();
+    let report = kael.sync();
 
-    assert_eq!(r.auto_offered, 1, "{r:?}");
-    assert_eq!(r.not_paired.len(), 1);
+    assert_eq!(report.auto_offered, 1, "{report:?}");
+    assert_eq!(report.not_paired.len(), 1);
 
     let offer = kael.state.inbox.chars[KAEL].offers[0].clone();
 
@@ -303,28 +309,28 @@ fn sterling_partners_pair_on_their_own()
     bran.sync();
 
     // Kael's Sterling hands the code to Bran in game; her Sterling saves it at logout.
-    bran.game_saves_codes(BRAN, "Brannoc Ashvale", t0 + 60, "SS2", &[(KAEL, Some("S2R2"), 1)], &[(KAEL, &offer.code)]);
+    bran.game_saves_codes(BRAN, "Brannoc Ashvale", started + 60, "SS2", &[(KAEL, Some("S2R2"), 1)], &[(KAEL, &offer.code)]);
 
-    let r = bran.sync();
+    let report = bran.sync();
 
-    assert_eq!(r.auto_paired.len(), 1, "{r:?}");
-    assert_eq!(r.auto_paired[0].2, "Kaelith Emberfall");
-    assert!(r.sent_to.contains(&(BRAN.to_string(), KAEL.to_string())), "her copy goes up right away");
+    assert_eq!(report.auto_paired.len(), 1, "{report:?}");
+    assert_eq!(report.auto_paired[0].2, "Kaelith Emberfall");
+    assert!(report.sent_to.contains(&(BRAN.to_string(), KAEL.to_string())), "her copy goes up right away");
     assert!(bran.state.inbox.chars[BRAN].offers.is_empty(), "her own offer is cancelled");
     assert!(bran.state.inbox.chars[BRAN].pairs.iter().any(|p| p.partner == KAEL && p.status == PairStatus::Active));
 
     // Kael's next sync sees the pairing, drops his offer and gets her copy.
-    let r = kael.sync();
+    let report = kael.sync();
 
-    assert!(kael.state.inbox.chars[KAEL].offers.is_empty(), "{r:?}");
+    assert!(kael.state.inbox.chars[KAEL].offers.is_empty(), "{report:?}");
     assert!(kael.state.inbox.chars[KAEL].packets.iter().any(|p| p.data == "S2R2"));
     assert!(kael.api.open_codes().unwrap().is_empty(), "no codes left open");
     assert!(bran.api.open_codes().unwrap().is_empty());
 
     // The same code again does nothing.
-    let r = bran.sync();
+    let report = bran.sync();
 
-    assert!(r.auto_paired.is_empty());
+    assert!(report.auto_paired.is_empty());
 
     kael.api.delete_account().unwrap();
     bran.api.delete_account().unwrap();
