@@ -24,7 +24,7 @@ const MAX_UNPACKED: u64 = 60 * 1024 * 1024;
 const MAX_ENTRIES: usize = 3000;
 const KEEP_OLD: usize = 3;
 
-static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4})?$").unwrap());
+static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4}(\.\d{1,3})?)?$").unwrap());
 static RE_FILE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9 _.()+-]{1,80}$").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -424,6 +424,8 @@ mod tests
         assert!(newer("0.2.30", "0.2.9"));
         assert!(newer("0.3", "0.2.99"));
         assert!(!newer("0.2.30", "0.2.30"));
+        assert!(newer("0.3.17.01", "0.3.17") && newer("0.3.18", "0.3.17.14") && newer("0.3.17.100", "0.3.17.99"));
+        assert!(valid_version("0.3.17.01"));
         assert!(valid_version("0.2.31") && !valid_version("0.2.31; rm") && !valid_version("../x"));
     }
 

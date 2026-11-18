@@ -24,7 +24,7 @@ pub struct Notice
     pub until: Option<i64>,
 }
 
-/// "0.1.25" as three numbers.
+/// "0.1.25" as three numbers. An internal build's 4th part ("0.1.25.03") is ignored: it counts as 0.1.25.
 fn version(text: &str) -> Option<[u32; 3]>
 {
     let mut out = [0u32; 3];
@@ -42,9 +42,12 @@ fn version(text: &str) -> Option<[u32; 3]>
         *slot = part.parse().ok()?;
     }
 
-    if parts.next().is_some()
+    if let Some(internal) = parts.next()
     {
-        return None;
+        if internal.is_empty() || internal.len() > 3 || !internal.bytes().all(|b| b.is_ascii_digit()) || parts.next().is_some()
+        {
+            return None;
+        }
     }
 
     Some(out)
@@ -175,6 +178,14 @@ mod tests
         assert!(!applies(&notice, "0.1.24", 0));
         assert!(applies(&notice, "0.1.25", 0));
         assert!(applies(&notice, "1.0.0", 0));
+    }
+
+    #[test]
+    fn an_internal_build_counts_as_its_release()
+    {
+        assert!(applies(&n("a"), "0.1.23.04", 0));
+        assert!(!applies(&n("a"), "0.1.24.01", 0));
+        assert!(!applies(&n("a"), "0.1.23.1234", 0));
     }
 
     #[test]

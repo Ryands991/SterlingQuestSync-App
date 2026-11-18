@@ -30,7 +30,10 @@ use sqs_core::paths::{self, GameFolder};
 use sqs_core::safety::{write_app_file, SafeFs};
 use sqs_core::{companion, notices, updater, Error};
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+// The version people see (window, tray, logs, server): "0.1.28.01" for an internal build. The package
+// version ("0.1.29-dev.1") is only for the updater, so it never offers an internal build an older release.
+const VERSION: &str = env!("SQS_DISPLAY_VERSION");
+const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MAX_ACTIVITY: usize = 200;
 const STERLING_CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 const MAX_OUTBOX_BYTES: u64 = 16 * 1024 * 1024;
@@ -2778,14 +2781,39 @@ mod tests
         assert_eq!(classify_autostart(false, Some(&[2])), Autostart::Missing);
     }
 
-    /// Every version has its release notes before it's tagged (docs/release-notes/v<version>.md).
+    /// Every released version has its release notes before it's tagged (docs/release-notes/v<version>.md).
+    /// Internal builds never get a tag, so they don't need notes yet.
     #[test]
     fn release_notes_exist_for_this_version()
     {
+        if PACKAGE_VERSION.contains("-dev.")
+        {
+            return;
+        }
+
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../docs/release-notes/v{VERSION}.md"));
         let text = std::fs::read_to_string(&path).unwrap_or_default();
 
         assert!(text.contains("## What's new"), "write {} before tagging this version", path.display());
+    }
+
+    /// An internal build shows as the release it started from plus a 4th part; a release shows as is.
+    #[test]
+    fn shown_version_follows_the_versioning_rule()
+    {
+        match PACKAGE_VERSION.split_once("-dev.")
+        {
+            Some((release, build)) =>
+            {
+                let parts: Vec<u32> = release.split('.').map(|part| part.parse().unwrap()).collect();
+
+                assert_eq!(VERSION, format!("{}.{}.{}.{:02}", parts[0], parts[1], parts[2] - 1, build.parse::<u32>().unwrap()));
+            }
+
+            None => assert_eq!(VERSION, PACKAGE_VERSION),
+        }
+
+        assert!(sqs_core::formats::valid_version(VERSION) && sqs_core::updater::valid_version(VERSION));
     }
 
     #[test]

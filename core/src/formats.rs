@@ -487,7 +487,7 @@ pub struct AppInfo
     pub sterling_latest: Option<String>,
 }
 
-static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4})?$").unwrap());
+static RE_VERSION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}\.\d{1,4}(\.\d{1,4}(\.\d{1,3})?)?$").unwrap());
 
 /// A version like 0.1.25.
 pub fn valid_version(version: &str) -> bool
@@ -981,7 +981,10 @@ mod tests
         assert_eq!(app.get("version").unwrap().as_str(), Some("0.1.2"));
         assert_eq!(app.get("latest").unwrap().as_str(), Some("0.1.3"));
 
-        for bad in ["0.1.3\" os.exit() --", "v0.1", "", "1.2.3.4"]
+        // an internal build's 4th part is fine; a 5th isn't
+        assert!(valid_version("0.1.28.01") && valid_version("0.3.17.100"));
+
+        for bad in ["0.1.3\" os.exit() --", "v0.1", "", "1.2.3.4.5", "1.2.3.4567"]
         {
             inbox.app = Some(AppInfo { version: "0.1.2".into(), latest: Some(bad.into()), sterling_latest: None });
             assert!(render_inbox(&inbox, 1794770123).is_err(), "{bad:?}");
