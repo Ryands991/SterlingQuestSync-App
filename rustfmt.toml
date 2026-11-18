@@ -1,0 +1,12 @@
+# Sterling code style, part 1: rustfmt (stable) joins lines up to 160 characters with 4-space indents.
+# Part 2 is tools/style.py (braces on their own line, blank lines after blocks and between groups),
+# which rustfmt can't do on stable. Always run both, in this order: cargo fmt, then python3 tools/style.py
+# (the pair is stable: running both again changes nothing). The check is "python3 tools/style.py --check",
+# not "cargo fmt --check", which flags part 2 on purpose.
+max_width = 160
+tab_spaces = 4
+hard_tabs = false
+use_small_heuristics = "Max"
+# Formatting only: never reorder imports or modules.
+reorder_imports = false
+reorder_modules = false

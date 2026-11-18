@@ -1,0 +1,10 @@
+{
+    "name": "sterling-quest-sync-app-tools",
+    "private": true,
+    "description": "Style tool for the Companion window's JavaScript. Run: npm install --prefix tools, then node tools/style.mjs",
+    "type": "module",
+    "devDependencies":
+    {
+        "@babel/parser": "^8.1.2"
+    }
+}

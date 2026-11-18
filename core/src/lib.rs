@@ -13,7 +13,8 @@ pub mod updater;
 pub mod notices;
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum Error
+{
     #[error("refused: {0}")]
     Refused(String),
     #[error("couldn't read saved data: {0}")]
