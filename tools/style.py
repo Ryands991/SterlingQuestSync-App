@@ -180,7 +180,7 @@ def blank_lines(lines):
         # Rule 4: a line that only closes things (}, }), };, }, ...) gets a blank line after it.
         if s and first_code_char(line, mask) in tuple(CLOSERS) and re.fullmatch(r"[\}\)\]][\}\)\]\(\)?]*[;,]?", s):
             ns = nxt.strip()
-            if first_code_char(nxt, nmask) in tuple(CLOSERS) or re.match(r"^(\.|\?|=>|as\b)", ns):
+            if first_code_char(nxt, nmask) in tuple(CLOSERS) or re.match(r"^(\.|\?|=>|as\b|\{)", ns):
                 continue
             out.append(("", []))
     return out

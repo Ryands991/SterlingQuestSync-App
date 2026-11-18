@@ -378,7 +378,6 @@ fn offer_codes(api: &dyn Api, state: &mut State, rep: &mut Report, outboxes: &[O
         {
             !partner_out.removed && valid_guid(&partner_out.guid) && partner_out.guid != character_out.guid && matches!(partner_out.app, PartnerApp::Has(_))
         })
-
         {
             if active_pair(pairings, &character_out.guid, &partner_out.guid).is_none() && !list.contains(&partner_out.guid)
             {

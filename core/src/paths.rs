@@ -156,7 +156,6 @@ pub fn candidates() -> Vec<PathBuf>
                 r"Games\World of Warcraft",
                 r"Battle.net\World of Warcraft",
             ]
-
             {
                 roots.push(PathBuf::from(&drive_root).join(sub));
             }
@@ -185,7 +184,6 @@ pub fn candidates() -> Vec<PathBuf>
                 ".wine/drive_c/Program Files (x86)/World of Warcraft",
                 "Games/World of Warcraft",
             ]
-
             {
                 roots.push(home.join(sub));
             }

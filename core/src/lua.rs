@@ -465,7 +465,6 @@ Third = -12
             "X = {",
             "X = 1e999999 + 1",
         ]
-
         {
             assert!(parse_saved_variables(bad).is_err(), "{}", bad);
         }

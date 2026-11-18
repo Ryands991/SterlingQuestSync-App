@@ -201,7 +201,6 @@ mod tests
             "https://github.com/SterlingAddons/a\"&calc",
             "file:///C:/Windows",
         ]
-
         {
             let mut notice = n("a");
 
